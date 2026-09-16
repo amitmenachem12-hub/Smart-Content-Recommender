@@ -32,3 +32,6 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env .env.local  # add your TMDB_API_KEY
 ```
+
+"This product uses the TMDB API but is not endorsed or certified by TMDB."
+
