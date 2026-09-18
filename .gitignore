@@ -52,3 +52,4 @@ Thumbs.db
 /data
 
 
+src/check_db.py
