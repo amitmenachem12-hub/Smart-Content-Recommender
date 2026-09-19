@@ -9,7 +9,7 @@ _BASE_URL = "https://api.themoviedb.org/3"
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _CACHE_PATH = os.path.join(_DATA_DIR, "movies_cache.json")
 
-_COMMON_FIELDS = {"id", "overview", "genre_ids", "vote_average"}
+_COMMON_FIELDS = {"id", "overview", "genre_ids", "vote_average", "poster_path"}
 
 
 def _auth_headers() -> dict[str, str]:

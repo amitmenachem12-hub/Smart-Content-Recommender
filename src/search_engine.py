@@ -83,9 +83,23 @@ def expand_query(query_text: str) -> str:
     return query_text + " " + " ".join(anchors)
 
 
-def semantic_search(query_text: str, top_k: int = 5, pool_size: int = 30) -> dict:
+def load_model() -> SentenceTransformer:
+    return SentenceTransformer(_MODEL_NAME)
+
+
+def load_movies() -> list[dict]:
     with open(_EMBEDDINGS_PATH, encoding="utf-8") as f:
-        movies: list[dict] = json.load(f)
+        return json.load(f)
+
+
+def semantic_search(
+    query_text: str,
+    top_k: int = 5,
+    pool_size: int = 30,
+    model: SentenceTransformer | None = None,
+    movies_data: list[dict] | None = None,
+) -> dict:
+    movies: list[dict] = movies_data if movies_data is not None else load_movies()
 
     target_media: str | None = None
     query_lower = query_text.lower()
@@ -97,7 +111,8 @@ def semantic_search(query_text: str, top_k: int = 5, pool_size: int = 30) -> dic
     if target_media is not None:
         movies = [m for m in movies if m.get("media_type") == target_media]
 
-    model = SentenceTransformer(_MODEL_NAME)
+    if model is None:
+        model = load_model()
     query_vec = model.encode(expand_query(query_text))
 
     emb_matrix = np.array([m["embedding"] for m in movies])
