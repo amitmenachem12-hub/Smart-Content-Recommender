@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from dotenv import load_dotenv
 import requests
 
@@ -10,6 +11,7 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _CACHE_PATH = os.path.join(_DATA_DIR, "movies_cache.json")
 
 _COMMON_FIELDS = {"id", "overview", "genre_ids", "vote_average", "poster_path"}
+_PROVIDER_REGION = "US"
 
 
 def _auth_headers() -> dict[str, str]:
@@ -60,6 +62,56 @@ def _normalize_item(raw: dict, media_type: str, genre_map: dict[int, str]) -> di
     return item
 
 
+def fetch_watch_providers(tmdb_id: int, media_type: str, region: str = _PROVIDER_REGION) -> list[dict]:
+    segment = "movie" if media_type == "Movie" else "tv"
+    try:
+        response = requests.get(
+            f"{_BASE_URL}/{segment}/{tmdb_id}/watch/providers",
+            headers=_auth_headers(),
+            timeout=10,
+        )
+        response.raise_for_status()
+        region_data = response.json().get("results", {}).get(region, {})
+        return [
+            {"name": p["provider_name"], "logo_path": p.get("logo_path", "")}
+            for p in region_data.get("flatrate", [])
+        ]
+    except Exception:
+        return []
+
+
+def fetch_certification(tmdb_id: int, media_type: str) -> str:
+    try:
+        if media_type == "Movie":
+            response = requests.get(
+                f"{_BASE_URL}/movie/{tmdb_id}/release_dates",
+                headers=_auth_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            for entry in response.json().get("results", []):
+                if entry.get("iso_3166_1") == "US":
+                    for rd in entry.get("release_dates", []):
+                        cert = rd.get("certification", "").strip()
+                        if cert:
+                            return cert
+        else:
+            response = requests.get(
+                f"{_BASE_URL}/tv/{tmdb_id}/content_ratings",
+                headers=_auth_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            for entry in response.json().get("results", []):
+                if entry.get("iso_3166_1") == "US":
+                    rating = entry.get("rating", "").strip()
+                    if rating:
+                        return rating
+    except Exception:
+        pass
+    return "Unrated"
+
+
 def fetch_and_cache_popular_movies(limit: int = 2000) -> list[dict]:
     os.makedirs(_DATA_DIR, exist_ok=True)
     genre_map = _fetch_genre_map()
@@ -92,6 +144,15 @@ def fetch_and_cache_popular_movies(limit: int = 2000) -> list[dict]:
                         seen[key] = item
 
     content = list(seen.values())[:limit]
+    total = len(content)
+    print(f"Fetching watch providers and certifications for {total} items ({_PROVIDER_REGION})…")
+    for i, item in enumerate(content, 1):
+        item["watch_providers"] = fetch_watch_providers(item["id"], item["media_type"])
+        item["certification"] = fetch_certification(item["id"], item["media_type"])
+        if i % 100 == 0:
+            print(f"  {i}/{total} done")
+        time.sleep(0.1)
+
     with open(_CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump(content, f, indent=4)
 

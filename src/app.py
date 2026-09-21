@@ -7,11 +7,12 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(__file__))
 
 from relevance_feedback import apply_user_feedback
-from search_engine import load_model, load_movies, semantic_search
+from search_engine import load_collection, load_model, semantic_search
 
 _POOL_SIZE = 100
 _TOP_K = 10
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
+_TMDB_LOGO_BASE = "https://image.tmdb.org/t/p/w45"
 
 
 # ---------------------------------------------------------------------------
@@ -23,9 +24,9 @@ def _get_model():
     return load_model()
 
 
-@st.cache_data
-def _get_movies() -> list[dict]:
-    return load_movies()
+@st.cache_resource
+def _get_collection():
+    return load_collection()
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,36 @@ def _display_label(item: dict) -> str:
 
 def _genre_names(item: dict) -> list[str]:
     return [g["name"] if isinstance(g, dict) else g for g in item.get("genres", [])]
+
+
+def _render_providers(item: dict) -> None:
+    providers = item.get("watch_providers", [])
+    if not providers:
+        return
+    logo_tags: list[str] = []
+    names_only: list[str] = []
+    for p in providers[:6]:
+        logo = p.get("logo_path", "")
+        name = p.get("name", "")
+        if logo:
+            url = f"{_TMDB_LOGO_BASE}/{logo.lstrip('/')}"
+            logo_tags.append(
+                f'<img src="{url}" title="{name}" '
+                f'style="width:32px;height:32px;border-radius:6px;">'
+            )
+        else:
+            names_only.append(name)
+
+    st.caption("Where to watch:")
+    if logo_tags:
+        html = (
+            '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">'
+            + "".join(logo_tags)
+            + "</div>"
+        )
+        st.markdown(html, unsafe_allow_html=True)
+    else:
+        st.write(", ".join(names_only))
 
 
 def _render_horizontal_card(item: dict, rank: int) -> None:
@@ -66,6 +97,7 @@ def _render_horizontal_card(item: dict, rank: int) -> None:
             st.caption(f"`{item.get('media_type', '?')}` · Match score: **{score:.2f}**")
             if genres:
                 st.caption(" · ".join(genres))
+            _render_providers(item)
             st.write(item.get("overview", ""))
 
 
@@ -81,6 +113,7 @@ def _render_result_card(item: dict, rank: int) -> None:
             st.caption(f"`{item.get('media_type', '?')}` · {score:.3f}")
         if genres:
             st.caption(", ".join(genres))
+        _render_providers(item)
         overview = item.get("overview", "")
         if len(overview) > 200:
             with st.expander("Overview"):
@@ -99,6 +132,7 @@ def _init_state() -> None:
     defaults: dict = {
         "stage": 0,
         "query": "",
+        "safe_search": False,
         "initial_pool": [],
         "top_k_results": [],
         "query_vector": None,
@@ -132,6 +166,11 @@ def _stage_0() -> None:
         placeholder="e.g. A relaxing comedy about friends in New York",
         key="query_input",
     )
+    safe_search = st.checkbox(
+        "Family Friendly / Safe for Work (excludes R, NC-17, TV-MA)",
+        value=False,
+        key="safe_search_checkbox",
+    )
     if st.button("Search", type="primary", disabled=not query.strip()):
         with st.spinner("Running hybrid semantic search…"):
             result = semantic_search(
@@ -139,9 +178,11 @@ def _stage_0() -> None:
                 top_k=_TOP_K,
                 pool_size=_POOL_SIZE,
                 model=_get_model(),
-                movies_data=_get_movies(),
+                collection=_get_collection(),
+                safe_search=safe_search,
             )
         st.session_state.query = query.strip()
+        st.session_state.safe_search = safe_search
         st.session_state.initial_pool = result["initial_pool"]
         st.session_state.top_k_results = result["top_k_results"]
         st.session_state.query_vector = result["query_vector"]

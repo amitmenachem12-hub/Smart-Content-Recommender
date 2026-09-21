@@ -2,16 +2,18 @@ import json
 import os
 import re
 
+import chromadb
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-_EMBEDDINGS_PATH = os.path.join(_DATA_DIR, "movies_with_embeddings.json")
+_CHROMA_DIR = os.path.join(_DATA_DIR, "chroma_db")
+_COLLECTION_NAME = "movies"
 _MODEL_NAME = "all-MiniLM-L6-v2"
 
 _STOP_WORDS = {"the", "a", "an", "of", "in", "at", "on", "and", "or", "to", "is", "it"}
 _MIN_SCORE = 0.25
-_GENRE_BOOST = 0.15
+_MATURE_RATINGS = frozenset(["R", "NC-17", "X", "TV-MA"])
 
 # Maps query keywords → TMDB genre names (covers both Movie and TV variants).
 _GENRE_BOOST_MAP: dict[str, list[str]] = {
@@ -44,6 +46,12 @@ _SEQUEL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_NEGATIVE_KEYWORDS = frozenset([
+    "eerie", "trouble", "plagued", "murder", "blood",
+    "haunted", "dark", "horror", "death", "killer",
+])
+_LIGHTHEARTED_TRIGGERS = frozenset(["funny", "comedy", "laugh", "relax"])
+
 
 def _title_words(title: str) -> set[str]:
     words = re.sub(r"[^\w\s]", "", title.lower()).split()
@@ -60,14 +68,34 @@ def _is_too_similar(candidate: set[str], selected: list[set[str]], threshold: fl
     return False
 
 
-def swap_sequel_for_original(selected_movie: dict, all_movies_data: list[dict]) -> dict:
+def _metadata_to_movie(doc_id: str, metadata: dict) -> dict:
+    return {
+        "id": doc_id,
+        "title": metadata["title"],
+        "overview": metadata["overview"],
+        "media_type": metadata["media_type"],
+        "genres": json.loads(metadata["genres_json"]),
+        "vote_average": metadata["vote_average"],
+        "poster_path": metadata["poster_path"],
+        "watch_providers": json.loads(metadata["watch_providers_json"]),
+        "certification": metadata.get("certification", "Unrated"),
+    }
+
+
+def swap_sequel_for_original(selected_movie: dict, collection: chromadb.Collection) -> dict:
     match = _SEQUEL_RE.match(selected_movie["title"])
     if not match:
         return selected_movie
     base_title = match.group(1).strip()
-    for movie in all_movies_data:
-        if movie["title"] == base_title:
-            return movie
+    result = collection.get(
+        where={"title": {"$eq": base_title}},
+        include=["metadatas", "embeddings"],
+        limit=1,
+    )
+    if result["ids"]:
+        movie = _metadata_to_movie(result["ids"][0], result["metadatas"][0])
+        movie["embedding"] = result["embeddings"][0]
+        return movie
     return selected_movie
 
 
@@ -87,9 +115,9 @@ def load_model() -> SentenceTransformer:
     return SentenceTransformer(_MODEL_NAME)
 
 
-def load_movies() -> list[dict]:
-    with open(_EMBEDDINGS_PATH, encoding="utf-8") as f:
-        return json.load(f)
+def load_collection() -> chromadb.Collection:
+    client = chromadb.PersistentClient(path=_CHROMA_DIR)
+    return client.get_collection(name=_COLLECTION_NAME)
 
 
 def semantic_search(
@@ -97,77 +125,109 @@ def semantic_search(
     top_k: int = 5,
     pool_size: int = 30,
     model: SentenceTransformer | None = None,
-    movies_data: list[dict] | None = None,
+    collection: chromadb.Collection | None = None,
+    safe_search: bool = False,
 ) -> dict:
-    movies: list[dict] = movies_data if movies_data is not None else load_movies()
+    if collection is None:
+        collection = load_collection()
 
-    target_media: str | None = None
     query_lower = query_text.lower()
+
+    # --- Media type filter ---
+    target_media: str | None = None
     if re.search(r"\b(show|series|tv)\b", query_lower):
         target_media = "TV Show"
     elif re.search(r"\b(movie|film)\b", query_lower):
         target_media = "Movie"
 
-    if target_media is not None:
-        movies = [m for m in movies if m.get("media_type") == target_media]
+    # --- Explicit genre intent (word-boundary matching avoids false positives) ---
+    target_genres: set[str] = set()
+    for keyword, genres in _GENRE_BOOST_MAP.items():
+        if re.search(rf"\b{re.escape(keyword)}\b", query_lower):
+            target_genres.update(genres)
 
+    # --- Encode query ---
     if model is None:
         model = load_model()
     query_vec = model.encode(expand_query(query_text))
-
-    emb_matrix = np.array([m["embedding"] for m in movies])
-
-    # Normalise once and use dot product as cosine similarity.
     query_norm = query_vec / np.linalg.norm(query_vec)
-    emb_norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
-    emb_normed = emb_matrix / np.where(emb_norms == 0, 1, emb_norms)
 
-    scores = emb_normed @ query_norm
+    # --- Query ChromaDB (no where filter) ---
+    # ChromaDB's $contains operator is unreliable for list-valued fields stored
+    # as strings. Fetch a large unfiltered candidate set and apply genre/media
+    # constraints in Python where the logic is transparent and testable.
+    fetch_n = min(pool_size * 4, collection.count())
+    if fetch_n == 0:
+        return {"initial_pool": [], "top_k_results": [], "query_vector": query_norm}
 
-    _NEGATIVE_KEYWORDS = [
-        "eerie", "trouble", "plagued", "murder", "blood",
-        "haunted", "dark", "horror", "death", "killer",
+    results = collection.query(
+        query_embeddings=[query_norm.tolist()],
+        n_results=fetch_n,
+        include=["embeddings", "metadatas", "distances"],
+    )
+
+    # ChromaDB returns cosine *distance*; convert to similarity (1 − distance).
+    candidates: list[tuple[dict, float]] = [
+        ({**_metadata_to_movie(doc_id, meta), "embedding": emb}, 1.0 - dist)
+        for doc_id, dist, meta, emb in zip(
+            results["ids"][0], results["distances"][0],
+            results["metadatas"][0], results["embeddings"][0],
+        )
     ]
-    _LIGHTHEARTED_TRIGGERS = ("funny", "comedy", "laugh", "relax")
 
-    if any(w in query_text.lower() for w in _LIGHTHEARTED_TRIGGERS):
-        for idx, movie in enumerate(movies):
-            overview_lower = movie.get("overview", "").lower()
-            if any(kw in overview_lower for kw in _NEGATIVE_KEYWORDS):
-                scores[idx] -= 0.15
+    # --- Python-side hard filtering ---
+    # Apply media-type, genre, and safe-search constraints here, not in
+    # ChromaDB, so the logic is not dependent on ChromaDB operator support.
+    if target_media is not None or target_genres or safe_search:
+        filtered: list[tuple[dict, float]] = []
+        for movie, score in candidates:
+            if target_media is not None and movie["media_type"] != target_media:
+                continue
+            pre_genre_names = {g["name"] if isinstance(g, dict) else g for g in movie["genres"]}
+            if target_genres and not (target_genres & pre_genre_names):
+                continue
+            if safe_search and movie.get("certification", "Unrated") in _MATURE_RATINGS:
+                continue
+            filtered.append((movie, score))
+        candidates = filtered
 
-    target_genres: set[str] = set()
-    for keyword, genres in _GENRE_BOOST_MAP.items():
-        if keyword in query_lower:
-            target_genres.update(genres)
+    # --- Lighthearted penalty (post-retrieval, re-sort only when triggered) ---
+    if any(w in query_lower for w in _LIGHTHEARTED_TRIGGERS):
+        candidates = [
+            (movie, score - 0.15)
+            if any(kw in movie["overview"].lower() for kw in _NEGATIVE_KEYWORDS)
+            else (movie, score)
+            for movie, score in candidates
+        ]
+        candidates.sort(key=lambda x: x[1], reverse=True)
 
-    if target_genres:
-        for idx, movie in enumerate(movies):
-            movie_genres = {
-                (g["name"] if isinstance(g, dict) else g)
-                for g in movie.get("genres", [])
-            }
-            if movie_genres & target_genres:
-                scores[idx] += _GENRE_BOOST
-
-    sorted_indices = np.argsort(scores)[::-1]
-
+    # --- Build pool with title dedup ---
     initial_pool: list[dict] = []
     selected_title_words: list[set[str]] = []
 
-    for i in sorted_indices:
+    for movie, score in candidates:
         if len(initial_pool) >= pool_size:
             break
-        if scores[i] < _MIN_SCORE:
+        if score < _MIN_SCORE:
             break
-        movie = swap_sequel_for_original(movies[i], movies)
+        movie = swap_sequel_for_original(movie, collection)
+        # swap_sequel_for_original returns a raw ChromaDB record that was never
+        # run through the pre-filter above, so both hard constraints must be
+        # checked again here before the item can enter the pool.
+        if target_media is not None and movie["media_type"] != target_media:
+            continue
+        movie_genre_names = {g["name"] if isinstance(g, dict) else g for g in movie["genres"]}
+        if target_genres and not (target_genres & movie_genre_names):
+            continue
+        if safe_search and movie.get("certification", "Unrated") in _MATURE_RATINGS:
+            continue
         candidate_words = _title_words(movie["title"])
         if _is_too_similar(candidate_words, selected_title_words):
             continue
-
-        initial_pool.append({**movie, "score": float(scores[i])})
+        initial_pool.append({**movie, "score": score})
         selected_title_words.append(candidate_words)
 
+    # --- Attach justification for top-k results ---
     top_k_results: list[dict] = []
     for candidate in initial_pool[:top_k]:
         genres = candidate.get("genres", [])
