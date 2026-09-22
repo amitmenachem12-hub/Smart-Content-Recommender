@@ -1,3 +1,4 @@
+import html as html_module
 import os
 import re
 import sys
@@ -13,11 +14,8 @@ _POOL_SIZE = 100
 _TOP_K = 10
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 _TMDB_LOGO_BASE = "https://image.tmdb.org/t/p/w45"
+_TMDB_THUMB_BASE = "https://image.tmdb.org/t/p/w92"
 
-
-# ---------------------------------------------------------------------------
-# Cached resource loaders — initialised once per Streamlit session
-# ---------------------------------------------------------------------------
 
 @st.cache_resource
 def _get_model():
@@ -29,9 +27,7 @@ def _get_collection():
     return load_collection()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _slug(text: str) -> str:
     return re.sub(r"[^\w]", "_", text)
@@ -45,88 +41,460 @@ def _genre_names(item: dict) -> list[str]:
     return [g["name"] if isinstance(g, dict) else g for g in item.get("genres", [])]
 
 
-def _render_providers(item: dict) -> None:
+def _esc(value: object) -> str:
+    return html_module.escape(str(value))
+
+
+# ─── CSS ─────────────────────────────────────────────────────────────────────
+
+_STYLES = """
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   Streaming-app design system
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Hero ──────────────────────────────────────────────────────── */
+.scr-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 62vh;
+    text-align: center;
+    padding: 60px 24px;
+    background: radial-gradient(ellipse 80% 55% at 50% 0%,
+                    rgba(124,58,237,.18) 0%, transparent 72%);
+    border-radius: 20px;
+}
+.scr-hero-icon {
+    font-size: 68px;
+    margin-bottom: 20px;
+    filter: drop-shadow(0 0 28px rgba(124,58,237,.55));
+}
+.scr-hero-title {
+    font-size: 52px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #E2D9F3 0%, #A78BFA 45%, #7C3AED 85%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0 0 14px;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+}
+.scr-hero-subtitle {
+    font-size: 18px;
+    color: rgba(226,232,240,.52);
+    margin: 0;
+    max-width: 420px;
+    line-height: 1.65;
+}
+
+/* ── Step progress strip ───────────────────────────────────────── */
+.scr-steps {
+    display: flex;
+    margin-bottom: 24px;
+    background: rgba(14,14,40,.65);
+    border: 1px solid rgba(124,58,237,.14);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.scr-step {
+    flex: 1;
+    text-align: center;
+    padding: 10px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(226,232,240,.28);
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    border-right: 1px solid rgba(124,58,237,.1);
+}
+.scr-step:last-child { border-right: none; }
+.scr-step.done  { color: rgba(196,181,253,.5); }
+.scr-step.active {
+    background: rgba(124,58,237,.18);
+    color: #C4B5FD;
+}
+
+/* ── Results header ────────────────────────────────────────────── */
+.scr-results-header { margin-bottom: 22px; }
+.scr-results-title {
+    font-size: 26px;
+    font-weight: 700;
+    color: #E2E8F0;
+    margin: 0 0 4px;
+}
+.scr-results-meta {
+    font-size: 14px;
+    color: rgba(167,139,250,.72);
+    margin: 0;
+}
+
+/* ── Card ──────────────────────────────────────────────────────── */
+.scr-card {
+    display: flex;
+    background: rgba(12,12,38,.84);
+    border-radius: 16px;
+    border: 1px solid rgba(124,58,237,.18);
+    overflow: hidden;
+    margin-bottom: 20px;
+    transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+    box-shadow: 0 6px 28px rgba(0,0,0,.46);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    cursor: default;
+}
+.scr-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 18px 52px rgba(0,0,0,.65),
+                0 4px 18px rgba(124,58,237,.30);
+    border-color: rgba(124,58,237,.50);
+}
+
+/* ── Compact card override ─────────────────────────────────────── */
+.scr-card.scr-compact {
+    border-radius: 12px;
+    margin-bottom: 14px;
+    box-shadow: 0 3px 14px rgba(0,0,0,.38);
+    background: rgba(12,12,38,.72);
+    border-color: rgba(124,58,237,.13);
+}
+.scr-card.scr-compact:hover {
+    box-shadow: 0 10px 28px rgba(0,0,0,.55),
+                0 2px 10px rgba(124,58,237,.22);
+    border-color: rgba(124,58,237,.40);
+}
+
+/* ── Poster ────────────────────────────────────────────────────── */
+.scr-poster {
+    width: 130px;
+    min-width: 130px;
+    height: 195px;
+    object-fit: cover;
+    flex-shrink: 0;
+    display: block;
+}
+.scr-poster-ph {
+    width: 130px;
+    min-width: 130px;
+    height: 195px;
+    background: rgba(124,58,237,.09);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 36px;
+    opacity: .45;
+}
+.scr-card.scr-compact .scr-poster,
+.scr-card.scr-compact .scr-poster-ph {
+    width: 82px;
+    min-width: 82px;
+    height: 123px;
+}
+.scr-card.scr-compact .scr-poster-ph { font-size: 26px; }
+
+/* ── Card body ─────────────────────────────────────────────────── */
+.scr-body {
+    padding: 20px 24px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+.scr-card.scr-compact .scr-body { padding: 14px 18px; gap: 5px; }
+
+/* ── Header row ────────────────────────────────────────────────── */
+.scr-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.scr-rank {
+    font-size: 11px;
+    font-weight: 700;
+    color: #C4B5FD;
+    background: rgba(124,58,237,.18);
+    border-radius: 5px;
+    padding: 3px 8px;
+    flex-shrink: 0;
+    margin-top: 3px;
+    letter-spacing: .3px;
+}
+.scr-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #F1F0FF;
+    margin: 0;
+    flex: 1;
+    line-height: 1.3;
+    min-width: 0;
+    word-break: break-word;
+}
+.scr-card.scr-compact .scr-title { font-size: 15px; }
+.scr-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+/* ── Badge ─────────────────────────────────────────────────────── */
+.scr-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .7px;
+    border-radius: 4px;
+    padding: 2px 8px;
+    background: rgba(124,58,237,.22);
+    color: #C4B5FD;
+    border: 1px solid rgba(124,58,237,.35);
+}
+.scr-badge-tv {
+    background: rgba(59,130,246,.18);
+    color: #93C5FD;
+    border-color: rgba(59,130,246,.32);
+}
+.scr-score {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(226,232,240,.4);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Genres, overview ──────────────────────────────────────────── */
+.scr-genres {
+    font-size: 13px;
+    color: rgba(196,181,253,.68);
+    letter-spacing: .1px;
+}
+.scr-overview {
+    font-size: 14px;
+    color: rgba(226,232,240,.68);
+    line-height: 1.65;
+    margin: 0;
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.scr-card.scr-compact .scr-overview {
+    -webkit-line-clamp: 2;
+    font-size: 13px;
+}
+
+/* ── Providers ─────────────────────────────────────────────────── */
+.scr-providers {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+.scr-providers-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(167,139,250,.52);
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    margin-right: 2px;
+}
+.scr-provider-logo {
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    object-fit: cover;
+    border: 1px solid rgba(255,255,255,.08);
+}
+.scr-provider-text { font-size: 12px; color: rgba(226,232,240,.52); }
+
+/* ── Justification callout ─────────────────────────────────────── */
+.scr-just {
+    font-size: 13px;
+    color: rgba(196,181,253,.82);
+    background: rgba(124,58,237,.10);
+    border-left: 3px solid rgba(124,58,237,.52);
+    border-radius: 0 6px 6px 0;
+    padding: 8px 12px;
+}
+
+/* ── Pool thumbnail grid ───────────────────────────────────────── */
+.scr-pool-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 4px 0 16px;
+}
+.scr-thumb {
+    width: 70px;
+    height: 105px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid rgba(124,58,237,.14);
+    transition: transform .15s ease, border-color .15s ease;
+    flex-shrink: 0;
+    vertical-align: top;
+}
+.scr-thumb:hover {
+    transform: scale(1.08);
+    border-color: rgba(124,58,237,.5);
+}
+.scr-thumb-ph {
+    width: 70px;
+    height: 105px;
+    border-radius: 8px;
+    background: rgba(124,58,237,.08);
+    border: 1px solid rgba(124,58,237,.12);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    opacity: .38;
+    flex-shrink: 0;
+    vertical-align: top;
+}
+
+/* ── Sidebar branding ──────────────────────────────────────────── */
+.scr-brand {
+    font-size: 20px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #A78BFA 0%, #7C3AED 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -.3px;
+    display: block;
+}
+.scr-tagline {
+    font-size: 12px;
+    color: rgba(167,139,250,.52);
+    display: block;
+    margin-top: 2px;
+}
+.scr-sidebar-query {
+    background: rgba(124,58,237,.11);
+    border: 1px solid rgba(124,58,237,.22);
+    border-radius: 8px;
+    padding: 9px 13px;
+    font-size: 14px;
+    font-style: italic;
+    color: #E2E8F0;
+    margin: 8px 0;
+    word-break: break-word;
+    line-height: 1.5;
+}
+</style>
+"""
+
+
+def _inject_styles() -> None:
+    st.html(_STYLES)
+
+
+# ─── HTML helpers ─────────────────────────────────────────────────────────────
+
+def _steps_html(active: int) -> str:
+    labels = ["Search", "Filter", "Rate", "Results"]
+    parts = []
+    for i, label in enumerate(labels, 1):
+        if i < active:
+            cls = "scr-step done"
+        elif i == active:
+            cls = "scr-step active"
+        else:
+            cls = "scr-step"
+        parts.append(f'<div class="{cls}">{label}</div>')
+    return f'<div class="scr-steps">{"".join(parts)}</div>'
+
+
+def _provider_logos_html(item: dict) -> str:
     providers = item.get("watch_providers", [])
     if not providers:
-        return
-    logo_tags: list[str] = []
-    names_only: list[str] = []
+        return ""
+    logos, names = [], []
     for p in providers[:6]:
         logo = p.get("logo_path", "")
-        name = p.get("name", "")
+        name = _esc(p.get("name", ""))
         if logo:
             url = f"{_TMDB_LOGO_BASE}/{logo.lstrip('/')}"
-            logo_tags.append(
-                f'<img src="{url}" title="{name}" '
-                f'style="width:32px;height:32px;border-radius:6px;">'
+            logos.append(
+                f'<img src="{url}" title="{name}" class="scr-provider-logo" alt="{name}">'
             )
         else:
-            names_only.append(name)
+            names.append(name)
+    if not logos and not names:
+        return ""
+    inner = "".join(logos)
+    if names:
+        inner += f'<span class="scr-provider-text">{", ".join(names)}</span>'
+    return (
+        f'<div class="scr-providers">'
+        f'<span class="scr-providers-label">Watch on</span>{inner}</div>'
+    )
 
-    st.caption("Where to watch:")
-    if logo_tags:
-        html = (
-            '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">'
-            + "".join(logo_tags)
-            + "</div>"
-        )
-        st.markdown(html, unsafe_allow_html=True)
-    else:
-        st.write(", ".join(names_only))
+
+def _poster_img_html(item: dict) -> str:
+    path = item.get("poster_path", "")
+    title = _esc(item.get("title", ""))
+    if path:
+        url = f"{_TMDB_IMAGE_BASE}/{path.lstrip('/')}"
+        return f'<img src="{url}" class="scr-poster" alt="{title} poster">'
+    return '<div class="scr-poster-ph">🎬</div>'
+
+
+def _card_html(item: dict, rank: int, compact: bool = False) -> str:
+    score = item.get("feedback_score", item.get("score", 0.0))
+    genres = _genre_names(item)
+    title = _esc(item.get("title", ""))
+    media_type = item.get("media_type", "?")
+    overview = _esc(item.get("overview", ""))
+
+    genre_html = (
+        f'<div class="scr-genres">{" · ".join(_esc(g) for g in genres)}</div>'
+        if genres else ""
+    )
+    just_html = ""
+    if just := item.get("justification"):
+        just_html = f'<div class="scr-just">💡 {_esc(just)}</div>'
+
+    badge_cls = f"scr-badge scr-badge-{_esc(media_type)}"
+    card_cls = "scr-card scr-compact" if compact else "scr-card"
+
+    return f"""
+<div class="{card_cls}">
+  {_poster_img_html(item)}
+  <div class="scr-body">
+    <div class="scr-header">
+      <span class="scr-rank">#{rank}</span>
+      <span class="scr-title">{title}</span>
+      <div class="scr-meta">
+        <span class="{badge_cls}">{_esc(media_type)}</span>
+        <span class="scr-score">{score:.2f}</span>
+      </div>
+    </div>
+    {genre_html}
+    <p class="scr-overview">{overview}</p>
+    {_provider_logos_html(item)}
+    {just_html}
+  </div>
+</div>"""
 
 
 def _render_horizontal_card(item: dict, rank: int) -> None:
-    """Wide horizontal card for Stage 3: poster on the left, details on the right."""
-    score = item.get("feedback_score", item.get("score", 0.0))
-    genres = _genre_names(item)
-
-    with st.container(border=True):
-        left, right = st.columns([1, 4])
-        with left:
-            path = item.get("poster_path")
-            if path:
-                full_url = f"{_TMDB_IMAGE_BASE}/{path.lstrip('/')}"
-                try:
-                    st.image(full_url, use_container_width=True)
-                except Exception:
-                    st.info("Image unavailable")
-            else:
-                st.info("Image unavailable")
-        with right:
-            st.markdown(f"### {rank}. {item['title']}")
-            st.caption(f"`{item.get('media_type', '?')}` · Match score: **{score:.2f}**")
-            if genres:
-                st.caption(" · ".join(genres))
-            _render_providers(item)
-            st.write(item.get("overview", ""))
+    st.markdown(_card_html(item, rank, compact=False), unsafe_allow_html=True)
 
 
 def _render_result_card(item: dict, rank: int) -> None:
-    """Compact card used for overflow results (rank > 5) in Stage 3."""
-    score = item.get("feedback_score", item.get("score", 0.0))
-    genres = _genre_names(item)
-    with st.container(border=True):
-        cols = st.columns([8, 2])
-        with cols[0]:
-            st.markdown(f"**{rank}. {item['title']}**")
-        with cols[1]:
-            st.caption(f"`{item.get('media_type', '?')}` · {score:.3f}")
-        if genres:
-            st.caption(", ".join(genres))
-        _render_providers(item)
-        overview = item.get("overview", "")
-        if len(overview) > 200:
-            with st.expander("Overview"):
-                st.write(overview)
-        else:
-            st.write(overview)
-        if justification := item.get("justification"):
-            st.info(justification, icon="💡")
+    st.markdown(_card_html(item, rank, compact=True), unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------------
-# Session-state initialisation & reset
-# ---------------------------------------------------------------------------
+# ─── Session state ────────────────────────────────────────────────────────────
 
 def _init_state() -> None:
     defaults: dict = {
@@ -155,24 +523,27 @@ def _go_to(stage: int) -> None:
     st.rerun()
 
 
-# ---------------------------------------------------------------------------
-# Stage renderers
-# ---------------------------------------------------------------------------
+# ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-def _stage_0() -> None:
-    st.subheader("What are you in the mood for?")
+def _sidebar_stage_0() -> None:
     query = st.text_input(
-        "Describe what you want to watch:",
-        placeholder="e.g. A relaxing comedy about friends in New York",
+        "What are you in the mood for?",
+        placeholder="e.g. relaxing comedy about friends in New York",
         key="query_input",
     )
-    safe_search = st.checkbox(
-        "Family Friendly / Safe for Work (excludes R, NC-17, TV-MA)",
+    safe_search = st.toggle(
+        "Family-friendly only",
         value=False,
-        key="safe_search_checkbox",
+        key="safe_search_toggle",
     )
-    if st.button("Search", type="primary", disabled=not query.strip()):
-        with st.spinner("Running hybrid semantic search…"):
+    st.space("small")
+    if st.button(
+        ":material/search: Search",
+        type="primary",
+        disabled=not query.strip(),
+        key="search_btn",
+    ):
+        with st.spinner("Searching…"):
             result = semantic_search(
                 query.strip(),
                 top_k=_TOP_K,
@@ -189,47 +560,40 @@ def _stage_0() -> None:
         _go_to(1)
 
 
-def _stage_1() -> None:
-    st.subheader("Step 1 — Filter seen content")
-    st.caption(f"Pool of **{len(st.session_state.initial_pool)}** results for: *{st.session_state.query}*")
-    st.write(
-        "Select anything you've already seen so we can learn your taste. "
-        "Skip this step to get recommendations straight away."
+def _sidebar_stage_1() -> None:
+    st.html(
+        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
     )
-
+    st.caption(
+        "Select titles you've already seen — we'll use your ratings to personalise results. "
+        "Skip to get recommendations straight away."
+    )
     options = [_display_label(item) for item in st.session_state.initial_pool]
-
     seen = st.multiselect(
-        "Titles you've already seen:",
+        "Already seen:",
         options=options,
         key="seen_multiselect",
+        label_visibility="visible",
     )
-
-    st.divider()
-    left, _, right = st.columns([2, 4, 2])
-    with left:
-        if st.button("Start Over"):
-            _reset()
-    with right:
-        next_label = "Rate Seen Items →" if seen else "Get Recommendations →"
-        if st.button(next_label, type="primary"):
-            st.session_state.seen_labels = seen
-            if seen:
-                _go_to(2)
-            else:
-                st.session_state.final_results = []
-                _go_to(3)
+    st.space("small")
+    next_label = ":material/star: Rate seen items" if seen else ":material/recommend: Get recommendations"
+    if st.button(next_label, type="primary", key="stage1_next"):
+        st.session_state.seen_labels = seen
+        if seen:
+            _go_to(2)
+        else:
+            st.session_state.final_results = []
+            _go_to(3)
+    if st.button(":material/restart_alt: Start over", key="stage1_reset"):
+        _reset()
 
 
-def _stage_2() -> None:
-    st.subheader("Step 2 — Rate what you've seen")
-    st.caption(
-        "Rate each title 1–10. "
-        "Ratings pull recommendations toward (high) or away from (low) similar content."
+def _sidebar_stage_2() -> None:
+    st.html(
+        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
     )
-
+    st.caption("Rate 1–10. High scores pull results toward similar content; low scores push away.")
     label_to_item = {_display_label(item): item for item in st.session_state.initial_pool}
-
     ratings: dict[str, int] = {}
     for label in st.session_state.seen_labels:
         item = label_to_item.get(label)
@@ -244,73 +608,167 @@ def _stage_2() -> None:
         )
         ratings[item["title"]] = rating
 
-    st.divider()
-    left, mid, _, right = st.columns([2, 2, 2, 2])
-    with left:
-        if st.button("← Back"):
+    st.space("small")
+    if st.button(":material/recommend: Get recommendations", type="primary", key="stage2_next"):
+        with st.spinner("Applying relevance feedback…"):
+            final = apply_user_feedback(
+                original_query_vector=st.session_state.query_vector,
+                rated_items=ratings,
+                candidate_pool=st.session_state.initial_pool,
+                top_k=_TOP_K,
+            )
+        st.session_state.final_results = final
+        _go_to(3)
+    col_back, col_reset = st.columns(2)
+    with col_back:
+        if st.button(":material/arrow_back: Back", key="stage2_back"):
             _go_to(1)
-    with mid:
-        if st.button("Start Over"):
+    with col_reset:
+        if st.button(":material/restart_alt: Start over", key="stage2_reset"):
             _reset()
-    with right:
-        if st.button("Get Recommendations →", type="primary"):
-            with st.spinner("Applying relevance feedback and re-ranking…"):
-                final = apply_user_feedback(
-                    original_query_vector=st.session_state.query_vector,
-                    rated_items=ratings,
-                    candidate_pool=st.session_state.initial_pool,
-                    top_k=_TOP_K,
-                )
-            st.session_state.final_results = final
-            _go_to(3)
 
 
-def _stage_3() -> None:
-    had_feedback = bool(st.session_state.seen_labels)
-
-    if had_feedback:
-        st.subheader("Your Personalised Recommendations")
-        st.caption("Re-ranked via Rocchio relevance feedback on your ratings.")
-        results = st.session_state.final_results
-    else:
-        st.subheader("Top Recommendations")
-        st.caption(f"Semantic search results for: *{st.session_state.query}*")
-        results = st.session_state.top_k_results
-
-    if not results:
-        st.warning("No recommendations found. Try a different query.")
-    else:
-        for rank, item in enumerate(results[:5], start=1):
-            _render_horizontal_card(item, rank)
-            if rank < min(5, len(results)):
-                st.divider()
-
-    st.divider()
-    if st.button("Start Over", type="primary"):
+def _sidebar_stage_3() -> None:
+    st.html(
+        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
+    )
+    n = len(
+        st.session_state.final_results
+        if st.session_state.seen_labels
+        else st.session_state.top_k_results
+    )
+    st.caption(f"{n} recommendation{'s' if n != 1 else ''} found.")
+    st.space("small")
+    if st.button(":material/search: New search", type="primary", key="stage3_reset"):
         _reset()
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+def _render_sidebar() -> None:
+    with st.sidebar:
+        st.html(
+            '<div class="scr-brand">🎬 Smart Recommender</div>'
+            '<div class="scr-tagline">Find your next binge.</div>'
+        )
+        st.divider()
+        sidebar_fn = {
+            0: _sidebar_stage_0,
+            1: _sidebar_stage_1,
+            2: _sidebar_stage_2,
+            3: _sidebar_stage_3,
+        }
+        sidebar_fn[st.session_state.stage]()
+
+
+# ─── Main area ────────────────────────────────────────────────────────────────
+
+def _pool_thumbs_html(items: list[dict], limit: int = 30) -> str:
+    thumbs = []
+    for item in items[:limit]:
+        path = item.get("poster_path", "")
+        title = _esc(item.get("title", ""))
+        if path:
+            url = f"{_TMDB_THUMB_BASE}/{path.lstrip('/')}"
+            thumbs.append(
+                f'<img src="{url}" title="{title}" class="scr-thumb" alt="{title}">'
+            )
+        else:
+            thumbs.append('<span class="scr-thumb-ph">🎬</span>')
+    return f'<div class="scr-pool-grid">{"".join(thumbs)}</div>'
+
+
+def _main_stage_0() -> None:
+    st.html("""
+<div class="scr-hero">
+  <div class="scr-hero-icon">🎬</div>
+  <h1 class="scr-hero-title">Find your next binge.</h1>
+  <p class="scr-hero-subtitle">
+    Describe what you're in the mood for and our AI matches you to
+    films and shows that fit — no genre checkboxes required.
+  </p>
+</div>
+""")
+
+
+def _main_stage_1() -> None:
+    pool = st.session_state.initial_pool
+    st.html(_steps_html(active=2))
+    st.html(f"""
+<div class="scr-results-header">
+  <p class="scr-results-title">Found {len(pool)} matches</p>
+  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — mark titles you've seen in the sidebar.</p>
+</div>
+""")
+    st.html(_pool_thumbs_html(pool))
+
+
+def _main_stage_2() -> None:
+    seen_labels = st.session_state.seen_labels
+    pool = st.session_state.initial_pool
+    label_to_item = {_display_label(i): i for i in pool}
+
+    st.html(_steps_html(active=3))
+    st.html(f"""
+<div class="scr-results-header">
+  <p class="scr-results-title">Rating {len(seen_labels)} title{"s" if len(seen_labels) != 1 else ""}</p>
+  <p class="scr-results-meta">Adjust the sliders in the sidebar, then get your recommendations.</p>
+</div>
+""")
+    rated_items = [label_to_item[l] for l in seen_labels if l in label_to_item]
+    if rated_items:
+        st.html(_pool_thumbs_html(rated_items, limit=len(rated_items)))
+
+
+def _main_stage_3() -> None:
+    had_feedback = bool(st.session_state.seen_labels)
+    if had_feedback:
+        heading = "Your personalised picks"
+        meta = "Re-ranked via Rocchio relevance feedback on your ratings."
+        results = st.session_state.final_results
+    else:
+        heading = "Top recommendations"
+        meta = f"Semantic search for \"{_esc(st.session_state.query)}\""
+        results = st.session_state.top_k_results
+
+    st.html(_steps_html(active=4))
+    st.html(f"""
+<div class="scr-results-header">
+  <p class="scr-results-title">{_esc(heading)}</p>
+  <p class="scr-results-meta">{meta}</p>
+</div>
+""")
+
+    if not results:
+        st.warning("No recommendations found. Try a different query in the sidebar.")
+        return
+
+    for rank, item in enumerate(results[:5], start=1):
+        _render_horizontal_card(item, rank)
+
+    if len(results) > 5:
+        st.markdown("##### More picks")
+        for rank, item in enumerate(results[5:], start=6):
+            _render_result_card(item, rank)
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main() -> None:
     st.set_page_config(
         page_title="Smart Content Recommender",
-        page_icon="🎬",
-        layout="centered",
+        page_icon=":material/movie:",
+        layout="wide",
     )
-    st.title("🎬 Smart Content Recommender")
-
+    _inject_styles()
     _init_state()
+    _render_sidebar()
 
-    stage_renderers = {
-        0: _stage_0,
-        1: _stage_1,
-        2: _stage_2,
-        3: _stage_3,
+    main_fn = {
+        0: _main_stage_0,
+        1: _main_stage_1,
+        2: _main_stage_2,
+        3: _main_stage_3,
     }
-    stage_renderers[st.session_state.stage]()
+    main_fn[st.session_state.stage]()
 
 
 if __name__ == "__main__":

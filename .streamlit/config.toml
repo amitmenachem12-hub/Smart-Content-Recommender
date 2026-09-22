@@ -1,0 +1,54 @@
+# Cinematic dark theme — deep violet on near-black
+[theme]
+base = "dark"
+primaryColor        = "#7C3AED"
+backgroundColor     = "#0D0D0F"
+secondaryBackgroundColor = "#14142B"
+codeBackgroundColor = "#1A1A2E"
+textColor           = "#E2E8F0"
+linkColor           = "#A78BFA"
+borderColor         = "#2A2A4A"
+showWidgetBorder    = true
+showSidebarBorder   = false
+baseRadius          = "large"
+buttonRadius        = "full"
+linkUnderline       = false
+
+font        = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap"
+codeFont    = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+baseFontSize    = 15
+baseFontWeight  = 400
+codeFontSize    = "0.875rem"
+headingFontSizes   = ["34px", "26px", "20px", "17px", "14px", "12px"]
+headingFontWeights = [700,    700,    600,    600,    600,    500   ]
+
+# Semantic palette
+violetColor = "#7C3AED"
+blueColor   = "#3B82F6"
+greenColor  = "#10B981"
+redColor    = "#EF4444"
+orangeColor = "#F97316"
+yellowColor = "#FBBF24"
+grayColor   = "#6B7280"
+
+chartCategoricalColors = [
+    "#7C3AED", "#3B82F6", "#10B981",
+    "#F97316", "#EF4444", "#FBBF24", "#8B5CF6"
+]
+
+[theme.dark]
+primaryColor        = "#7C3AED"
+backgroundColor     = "#0D0D0F"
+secondaryBackgroundColor = "#14142B"
+textColor           = "#E2E8F0"
+chartCategoricalColors = [
+    "#A78BFA", "#60A5FA", "#34D399",
+    "#FB923C", "#F87171", "#FCD34D", "#C4B5FD"
+]
+
+[theme.dark.sidebar]
+backgroundColor          = "#0A0A1A"
+secondaryBackgroundColor = "#111128"
+borderColor              = "#1E1E3A"
