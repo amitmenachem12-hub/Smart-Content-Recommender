@@ -48,8 +48,10 @@ Thumbs.db
 # Logs
 *.log
 
-#data
+# Data / vector store (never commit heavy local files or the built index)
 /data
 
+# Streamlit secrets (local dev credentials — never commit)
+.streamlit/secrets.toml
 
 src/check_db.py

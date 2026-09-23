@@ -59,6 +59,8 @@ def _normalize_item(raw: dict, media_type: str, genre_map: dict[int, str]) -> di
     item["title"] = title
     item["genres"] = [genre_map[gid] for gid in item.pop("genre_ids", []) if gid in genre_map]
     item["media_type"] = media_type
+    item["original_language"] = raw.get("original_language") or ""
+    item["origin_country"] = raw.get("origin_country") or []
     return item
 
 
@@ -118,17 +120,22 @@ def fetch_and_cache_popular_movies(limit: int = 2000) -> list[dict]:
     headers = _auth_headers()
     seen: dict[tuple[str, int], dict] = {}
 
-    sources = [
-        ("/discover/movie", "Movie", 40),
-        ("/discover/tv", "TV Show", 40),
+    # Each entry: (endpoint, media_type, pages, extra_params).
+    # The targeted language batches ensure under-represented content (e.g. Israeli
+    # cinema) is present even though it doesn't rank in the global popularity sort.
+    sources: list[tuple[str, str, int, dict]] = [
+        ("/discover/movie", "Movie",   40, {}),
+        ("/discover/tv",   "TV Show", 40, {}),
+        ("/discover/movie", "Movie",    5, {"with_original_language": "he"}),
+        ("/discover/tv",   "TV Show",  5, {"with_original_language": "he"}),
     ]
 
-    for endpoint, media_type, pages in sources:
+    for endpoint, media_type, pages, extra_params in sources:
         for page in range(1, pages + 1):
             response = requests.get(
                 f"{_BASE_URL}{endpoint}",
                 headers=headers,
-                params={"page": page, "language": "en-US", "sort_by": "vote_count.desc"},
+                params={"page": page, "language": "en-US", "sort_by": "vote_count.desc", **extra_params},
                 timeout=10,
             )
             response.raise_for_status()

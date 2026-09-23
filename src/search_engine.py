@@ -46,6 +46,12 @@ _SEQUEL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Maps frozensets of trigger keywords → (ISO 639-1 language code, ISO 3166-1 country codes).
+# A result passes if its original_language matches OR any of its origin_country codes match.
+_COUNTRY_FILTER_MAP: list[tuple[frozenset[str], str, list[str]]] = [
+    (frozenset(["israeli", "israel", "hebrew"]), "he", ["IL"]),
+]
+
 _NEGATIVE_KEYWORDS = frozenset([
     "eerie", "trouble", "plagued", "murder", "blood",
     "haunted", "dark", "horror", "death", "killer",
@@ -79,7 +85,24 @@ def _metadata_to_movie(doc_id: str, metadata: dict) -> dict:
         "poster_path": metadata["poster_path"],
         "watch_providers": json.loads(metadata["watch_providers_json"]),
         "certification": metadata.get("certification", "Unrated"),
+        "original_language": metadata.get("original_language", ""),
+        "origin_country": json.loads(metadata.get("origin_country_json", "[]")),
     }
+
+
+def _detect_country_filter(query_lower: str) -> tuple[str, list[str]] | None:
+    """Returns (language_code, country_codes) if a nationality keyword matches, else None."""
+    for keywords, lang, countries in _COUNTRY_FILTER_MAP:
+        if any(re.search(rf"\b{re.escape(kw)}\b", query_lower) for kw in keywords):
+            return (lang, countries)
+    return None
+
+
+def _passes_country_filter(movie: dict, lang: str, countries: list[str]) -> bool:
+    return (
+        movie.get("original_language") == lang
+        or any(c in movie.get("origin_country", []) for c in countries)
+    )
 
 
 def swap_sequel_for_original(selected_movie: dict, collection: chromadb.Collection) -> dict:
@@ -146,6 +169,9 @@ def semantic_search(
         if re.search(rf"\b{re.escape(keyword)}\b", query_lower):
             target_genres.update(genres)
 
+    # --- Country/language intent (e.g. "Israeli movie", "Hebrew film") ---
+    country_filter = _detect_country_filter(query_lower)
+
     # --- Encode query ---
     if model is None:
         model = load_model()
@@ -176,9 +202,9 @@ def semantic_search(
     ]
 
     # --- Python-side hard filtering ---
-    # Apply media-type, genre, and safe-search constraints here, not in
-    # ChromaDB, so the logic is not dependent on ChromaDB operator support.
-    if target_media is not None or target_genres or safe_search:
+    # Apply media-type, genre, country/language, and safe-search constraints here,
+    # not in ChromaDB, so the logic is not dependent on ChromaDB operator support.
+    if target_media is not None or target_genres or country_filter or safe_search:
         filtered: list[tuple[dict, float]] = []
         for movie, score in candidates:
             if target_media is not None and movie["media_type"] != target_media:
@@ -186,6 +212,10 @@ def semantic_search(
             pre_genre_names = {g["name"] if isinstance(g, dict) else g for g in movie["genres"]}
             if target_genres and not (target_genres & pre_genre_names):
                 continue
+            if country_filter is not None:
+                lang, countries = country_filter
+                if not _passes_country_filter(movie, lang, countries):
+                    continue
             if safe_search and movie.get("certification", "Unrated") in _MATURE_RATINGS:
                 continue
             filtered.append((movie, score))
@@ -219,6 +249,10 @@ def semantic_search(
         movie_genre_names = {g["name"] if isinstance(g, dict) else g for g in movie["genres"]}
         if target_genres and not (target_genres & movie_genre_names):
             continue
+        if country_filter is not None:
+            lang, countries = country_filter
+            if not _passes_country_filter(movie, lang, countries):
+                continue
         if safe_search and movie.get("certification", "Unrated") in _MATURE_RATINGS:
             continue
         candidate_words = _title_words(movie["title"])

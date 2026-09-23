@@ -20,7 +20,14 @@ def generate_movie_embeddings() -> None:
     model = SentenceTransformer(_MODEL_NAME)
 
     texts = [
-        f"Type: {m.get('media_type') or ''}. Genres: {', '.join(m.get('genres') or [])}. Title: {m.get('title') or ''}. Overview: {m.get('overview') or ''}"
+        (
+            f"Type: {m.get('media_type') or ''}. "
+            f"Genres: {', '.join(m.get('genres') or [])}. "
+            f"Country: {', '.join(m.get('origin_country') or [])}. "
+            f"Language: {m.get('original_language') or ''}. "
+            f"Title: {m.get('title') or ''}. "
+            f"Overview: {m.get('overview') or ''}"
+        )
         for m in movies
     ]
     embeddings = model.encode(texts, show_progress_bar=True)
@@ -80,6 +87,8 @@ def build_chroma_collection() -> None:
             "poster_path": movie.get("poster_path") or "",
             "watch_providers_json": json.dumps(movie.get("watch_providers") or []),
             "certification": movie.get("certification") or "Unrated",
+            "original_language": movie.get("original_language") or "",
+            "origin_country_json": json.dumps(movie.get("origin_country") or []),
         })
         documents.append(movie.get("title") or "")
 
