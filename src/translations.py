@@ -2,8 +2,8 @@ UI_TEXT: dict[str, dict[str, str]] = {
     "en": {
         "hero_title": "Find your next binge.",
         "hero_subtitle": (
-            "Describe what you're in the mood for and our AI matches you to "
-            "films and shows that fit — no genre checkboxes required."
+            "Describe what you're in the mood for and we'll find films and "
+            "shows that fit — no genre checkboxes required."
         ),
         "search_label": "What are you in the mood for?",
         "search_placeholder": "e.g. relaxing comedy about friends in New York",
@@ -22,7 +22,7 @@ UI_TEXT: dict[str, dict[str, str]] = {
     "he": {
         "hero_title": "מצא את הבינג׳ הבא שלך.",
         "hero_subtitle": (
-            "תאר מה מתחשק לך לצפות, והבינה המלאכותית שלנו תמצא סרטים "
+            "תאר מה מתחשק לך לצפות, ואנחנו נמצא סרטים "
             "וסדרות שמתאימים לך — בלי לסמן ז׳אנרים."
         ),
         "search_label": "מה מתחשק לך לצפות?",
