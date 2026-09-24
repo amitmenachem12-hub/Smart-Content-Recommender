@@ -232,7 +232,8 @@ _STYLES = """
     flex: 1;
     line-height: 1.3;
     min-width: 0;
-    word-break: break-word;
+    word-break: normal;
+    overflow-wrap: break-word;
 }
 .scr-card.scr-compact .scr-title { font-size: 15px; }
 .scr-meta {
@@ -390,6 +391,10 @@ _STYLES = """
     line-height: 1.5;
 }
 
+/* ── Mobile typography ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .scr-title { font-size: 15px; }
+}
 </style>
 """
 
