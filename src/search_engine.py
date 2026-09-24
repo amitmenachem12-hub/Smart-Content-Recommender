@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _CHROMA_DIR = os.path.join(_DATA_DIR, "chroma_db")
 _COLLECTION_NAME = "movies"
-_MODEL_NAME = "all-MiniLM-L6-v2"
+_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
 _STOP_WORDS = {"the", "a", "an", "of", "in", "at", "on", "and", "or", "to", "is", "it"}
 _MIN_SCORE = 0.25
@@ -158,9 +158,9 @@ def semantic_search(
 
     # --- Media type filter ---
     target_media: str | None = None
-    if re.search(r"\b(show|series|tv)\b", query_lower):
+    if re.search(r"\b(show|series|tv)\b|סדרה|סדרות|טלוויזיה|תכנית|תוכנית", query_lower):
         target_media = "TV Show"
-    elif re.search(r"\b(movie|film)\b", query_lower):
+    elif re.search(r"\b(movie|film)\b|סרט|סרטים|קולנוע", query_lower):
         target_media = "Movie"
 
     # --- Explicit genre intent (word-boundary matching avoids false positives) ---
@@ -178,18 +178,21 @@ def semantic_search(
     query_vec = model.encode(expand_query(query_text))
     query_norm = query_vec / np.linalg.norm(query_vec)
 
-    # --- Query ChromaDB (no where filter) ---
-    # ChromaDB's $contains operator is unreliable for list-valued fields stored
-    # as strings. Fetch a large unfiltered candidate set and apply genre/media
-    # constraints in Python where the logic is transparent and testable.
-    fetch_n = min(pool_size * 4, collection.count())
+    # --- Query ChromaDB ---
+    # media_type is a flat string field — $eq filtering is reliable and applied
+    # here to enforce strict media-type intent at the database level.
+    # Genre/country filtering remains Python-side because those fields are stored
+    # as pipe-delimited strings where ChromaDB's $contains is unreliable.
+    fetch_n = min(pool_size * 5, collection.count())
     if fetch_n == 0:
         return {"initial_pool": [], "top_k_results": [], "query_vector": query_norm}
 
+    where_clause = {"media_type": {"$eq": target_media}} if target_media else None
     results = collection.query(
         query_embeddings=[query_norm.tolist()],
         n_results=fetch_n,
         include=["embeddings", "metadatas", "distances"],
+        **({"where": where_clause} if where_clause else {}),
     )
 
     # ChromaDB returns cosine *distance*; convert to similarity (1 − distance).

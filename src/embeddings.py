@@ -9,7 +9,9 @@ _CACHE_PATH = os.path.join(_DATA_DIR, "movies_cache.json")
 _OUTPUT_PATH = os.path.join(_DATA_DIR, "movies_with_embeddings.json")
 _CHROMA_DIR = os.path.join(_DATA_DIR, "chroma_db")
 _COLLECTION_NAME = "movies"
-_MODEL_NAME = "all-MiniLM-L6-v2"
+# NOTE: ChromaDB must be dropped and rebuilt after this change.
+# Run: python src/embeddings.py
+_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _UPSERT_BATCH = 500
 
 

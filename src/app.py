@@ -1,3 +1,4 @@
+import concurrent.futures
 import html as html_module
 import os
 import re
@@ -9,6 +10,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from relevance_feedback import apply_user_feedback
 from search_engine import load_collection, load_model, semantic_search
+from tmdb_client import fetch_item_details
+from translations import UI_TEXT
 
 _POOL_SIZE = 100
 _TOP_K = 10
@@ -361,23 +364,6 @@ _STYLES = """
     vertical-align: top;
 }
 
-/* ── Sidebar branding ──────────────────────────────────────────── */
-.scr-brand {
-    font-size: 20px;
-    font-weight: 800;
-    background: linear-gradient(90deg, #A78BFA 0%, #7C3AED 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: -.3px;
-    display: block;
-}
-.scr-tagline {
-    font-size: 12px;
-    color: rgba(167,139,250,.52);
-    display: block;
-    margin-top: 2px;
-}
 .scr-sidebar-query {
     background: rgba(124,58,237,.11);
     border: 1px solid rgba(124,58,237,.22);
@@ -521,6 +507,7 @@ def _init_state() -> None:
         "query_vector": None,
         "seen_labels": [],
         "final_results": [],
+        "lang": "en",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -555,36 +542,53 @@ def _pool_thumbs_html(items: list[dict], limit: int = 30) -> str:
     return f'<div class="scr-pool-grid">{"".join(thumbs)}</div>'
 
 
+def _localize_results(items: list[dict], language: str) -> list[dict]:
+    """Overlay localized title/overview from TMDB; falls back to English on missing translation."""
+    if language == "en-US":
+        return items
+
+    def _fetch_one(item: dict) -> dict:
+        numeric_id = int(str(item["id"]).rsplit("_", 1)[-1])
+        details = fetch_item_details(numeric_id, item["media_type"], language=language)
+        updated = dict(item)
+        if details.get("title"):
+            updated["title"] = details["title"]
+        if details.get("overview"):
+            updated["overview"] = details["overview"]
+        return updated
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        return list(executor.map(_fetch_one, items))
+
+
 def _main_stage_0() -> None:
-    st.html("""
+    t = UI_TEXT[st.session_state.lang]
+    st.html(f"""
 <div class="scr-hero">
   <div class="scr-hero-icon">🎬</div>
-  <h1 class="scr-hero-title">Find your next binge.</h1>
-  <p class="scr-hero-subtitle">
-    Describe what you're in the mood for and our AI matches you to
-    films and shows that fit — no genre checkboxes required.
-  </p>
+  <h1 class="scr-hero-title">{_esc(t["hero_title"])}</h1>
+  <p class="scr-hero-subtitle">{_esc(t["hero_subtitle"])}</p>
 </div>
 """)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        query = st.text_input(
-            "What are you in the mood for?",
-            placeholder="e.g. relaxing comedy about friends in New York",
-            key="query_input",
-        )
-        safe_search = st.toggle(
-            "Family-friendly only",
-            value=False,
-            key="safe_search_toggle",
-        )
-        st.space("small")
-        if st.button(
-            ":material/search: Search",
-            type="primary",
-            disabled=not query.strip(),
-            key="search_btn",
-        ):
+        with st.form("search_form"):
+            query = st.text_input(
+                t["search_label"],
+                placeholder=t["search_placeholder"],
+                key="query_input",
+            )
+            safe_search = st.toggle(
+                "Family-friendly only",
+                value=False,
+                key="safe_search_toggle",
+            )
+            st.space("small")
+            submitted = st.form_submit_button(
+                ":material/search: Search",
+                type="primary",
+            )
+        if submitted and query.strip():
             with st.spinner("Searching…"):
                 result = semantic_search(
                     query.strip(),
@@ -594,6 +598,9 @@ def _main_stage_0() -> None:
                     collection=_get_collection(),
                     safe_search=safe_search,
                 )
+                tmdb_lang = "he-IL" if st.session_state.lang == "he" else "en-US"
+                result["initial_pool"] = _localize_results(result["initial_pool"], tmdb_lang)
+                result["top_k_results"] = _localize_results(result["top_k_results"], tmdb_lang)
             st.session_state.query = query.strip()
             st.session_state.safe_search = safe_search
             st.session_state.initial_pool = result["initial_pool"]
@@ -603,12 +610,13 @@ def _main_stage_0() -> None:
 
 
 def _main_stage_1() -> None:
+    t = UI_TEXT[st.session_state.lang]
     pool = st.session_state.initial_pool
     st.html(_steps_html(active=2))
     st.html(f"""
 <div class="scr-results-header">
-  <p class="scr-results-title">Found {len(pool)} matches</p>
-  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — mark any titles you've already seen below.</p>
+  <p class="scr-results-title">{_esc(t["stage1_found"].format(n=len(pool)))}</p>
+  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — {_esc(t["stage1_mark_hint"])}</p>
 </div>
 """)
     st.html(_pool_thumbs_html(pool))
@@ -617,19 +625,16 @@ def _main_stage_1() -> None:
         st.html(
             f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
         )
-        st.caption(
-            "Select titles you've already seen — we'll use your ratings to personalise results. "
-            "Skip to get recommendations straight away."
-        )
+        st.caption(t["stage1_caption"])
         options = [_display_label(item) for item in st.session_state.initial_pool]
         seen = st.multiselect(
-            "Already seen:",
+            t["stage1_seen_label"],
             options=options,
             key="seen_multiselect",
             label_visibility="visible",
         )
         st.space("small")
-        next_label = ":material/star: Rate seen items" if seen else ":material/recommend: Get recommendations"
+        next_label = t["stage1_rate_btn"] if seen else t["stage1_rec_btn"]
         if st.button(next_label, type="primary", key="stage1_next"):
             st.session_state.seen_labels = seen
             if seen:
@@ -637,7 +642,7 @@ def _main_stage_1() -> None:
             else:
                 st.session_state.final_results = []
                 _go_to(3)
-        if st.button(":material/restart_alt: Start over", key="stage1_reset"):
+        if st.button(t["stage1_start_over"], key="stage1_reset"):
             _reset()
 
 
@@ -686,6 +691,8 @@ def _main_stage_2() -> None:
                     candidate_pool=st.session_state.initial_pool,
                     top_k=_TOP_K,
                 )
+                tmdb_lang = "he-IL" if st.session_state.lang == "he" else "en-US"
+                final = _localize_results(final, tmdb_lang)
             st.session_state.final_results = final
             _go_to(3)
         col_back, col_reset = st.columns(2)
@@ -740,18 +747,54 @@ def main() -> None:
     )
     
     _inject_styles()
-    
-    # התיקון לסליידר ממוקם כאן כדי לדרוס כל עיצוב קודם
-    st.markdown("""
-        <style>
-            div[data-testid="stSlider"], 
-            div[data-testid="stSlider"] * {
-                direction: ltr !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    
     _init_state()
+
+    _, lang_col = st.columns([4, 1])
+    with lang_col:
+        chosen = st.segmented_control(
+            UI_TEXT[st.session_state.lang]["lang_toggle"],
+            options=["en", "he"],
+            default=st.session_state.lang,
+            format_func=lambda x: x.upper(),
+            key="lang_ctrl",
+        )
+    if chosen and chosen != st.session_state.lang:
+        st.session_state.lang = chosen
+        st.rerun()
+
+    if st.session_state.lang == "he":
+        st.markdown("""
+<style>
+/* ── Hebrew RTL ─────────────────────────────────────────────────── */
+.block-container, p, h1, h2, h3, div {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Preserve st.columns order — RTL on a flex-row reverses item order */
+[data-testid="stHorizontalBlock"] {
+    direction: ltr;
+}
+
+/* Preserve horizontal radio buttons (1–10 rating scale) */
+[data-testid="stRadio"],
+[data-testid="stRadio"] > div {
+    direction: ltr !important;
+    flex-direction: row !important;
+}
+[data-testid="stRadio"] label {
+    direction: ltr;
+    text-align: left;
+}
+
+/* Keep exception tracebacks and code blocks readable (LTR) */
+.stException, .stException *,
+code, pre {
+    direction: ltr !important;
+    text-align: left !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
     main_fn = {
         0: _main_stage_0,

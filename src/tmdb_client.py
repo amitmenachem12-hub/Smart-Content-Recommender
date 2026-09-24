@@ -82,6 +82,45 @@ def fetch_watch_providers(tmdb_id: int, media_type: str, region: str = _PROVIDER
         return []
 
 
+def fetch_item_details(tmdb_id: int, media_type: str, language: str = "en-US") -> dict:
+    """Return localized title and overview for one item.
+
+    If the requested language yields an empty title or overview, a second
+    request with 'en-US' is made to fill the gaps so cards are never blank.
+    Falls back to an empty dict on network or HTTP errors.
+    """
+    segment = "movie" if media_type == "Movie" else "tv"
+    title_key = "title" if media_type == "Movie" else "name"
+
+    def _get(lang: str) -> dict:
+        try:
+            response = requests.get(
+                f"{_BASE_URL}/{segment}/{tmdb_id}",
+                headers=_auth_headers(),
+                params={"language": lang},
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "title": data.get(title_key) or "",
+                "overview": data.get("overview") or "",
+            }
+        except Exception:
+            return {}
+
+    result = _get(language)
+
+    if language != "en-US" and (not result.get("title") or not result.get("overview")):
+        fallback = _get("en-US")
+        result = {
+            "title": result.get("title") or fallback.get("title", ""),
+            "overview": result.get("overview") or fallback.get("overview", ""),
+        }
+
+    return result
+
+
 def fetch_certification(tmdb_id: int, media_type: str) -> str:
     try:
         if media_type == "Movie":
