@@ -389,6 +389,7 @@ _STYLES = """
     word-break: break-word;
     line-height: 1.5;
 }
+
 </style>
 """
 
@@ -460,8 +461,14 @@ def _card_html(item: dict, rank: int, compact: bool = False) -> str:
         if genres else ""
     )
     just_html = ""
-    if just := item.get("justification"):
-        just_html = f'<div class="scr-just">💡 {_esc(just)}</div>'
+    if item.get("justification"):
+        genre_str = ", ".join(genres) if genres else ""
+        clean_just = (
+            f"Recommended because it strongly matches your intent and features genres: {genre_str}"
+            if genre_str
+            else "Recommended because it strongly matches your intent"
+        )
+        just_html = f'<div class="scr-just">💡 {_esc(clean_just)}</div>'
 
     badge_cls = f"scr-badge scr-badge-{_esc(media_type)}"
     card_cls = "scr-card scr-compact" if compact else "scr-card"
@@ -523,142 +530,6 @@ def _go_to(stage: int) -> None:
     st.rerun()
 
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
-
-def _sidebar_stage_0() -> None:
-    query = st.text_input(
-        "What are you in the mood for?",
-        placeholder="e.g. relaxing comedy about friends in New York",
-        key="query_input",
-    )
-    safe_search = st.toggle(
-        "Family-friendly only",
-        value=False,
-        key="safe_search_toggle",
-    )
-    st.space("small")
-    if st.button(
-        ":material/search: Search",
-        type="primary",
-        disabled=not query.strip(),
-        key="search_btn",
-    ):
-        with st.spinner("Searching…"):
-            result = semantic_search(
-                query.strip(),
-                top_k=_TOP_K,
-                pool_size=_POOL_SIZE,
-                model=_get_model(),
-                collection=_get_collection(),
-                safe_search=safe_search,
-            )
-        st.session_state.query = query.strip()
-        st.session_state.safe_search = safe_search
-        st.session_state.initial_pool = result["initial_pool"]
-        st.session_state.top_k_results = result["top_k_results"]
-        st.session_state.query_vector = result["query_vector"]
-        _go_to(1)
-
-
-def _sidebar_stage_1() -> None:
-    st.html(
-        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
-    )
-    st.caption(
-        "Select titles you've already seen — we'll use your ratings to personalise results. "
-        "Skip to get recommendations straight away."
-    )
-    options = [_display_label(item) for item in st.session_state.initial_pool]
-    seen = st.multiselect(
-        "Already seen:",
-        options=options,
-        key="seen_multiselect",
-        label_visibility="visible",
-    )
-    st.space("small")
-    next_label = ":material/star: Rate seen items" if seen else ":material/recommend: Get recommendations"
-    if st.button(next_label, type="primary", key="stage1_next"):
-        st.session_state.seen_labels = seen
-        if seen:
-            _go_to(2)
-        else:
-            st.session_state.final_results = []
-            _go_to(3)
-    if st.button(":material/restart_alt: Start over", key="stage1_reset"):
-        _reset()
-
-
-def _sidebar_stage_2() -> None:
-    st.html(
-        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
-    )
-    st.caption("Rate 1–10. High scores pull results toward similar content; low scores push away.")
-    label_to_item = {_display_label(item): item for item in st.session_state.initial_pool}
-    ratings: dict[str, int] = {}
-    for label in st.session_state.seen_labels:
-        item = label_to_item.get(label)
-        if item is None:
-            continue
-        rating = st.slider(
-            label,
-            min_value=1,
-            max_value=10,
-            value=5,
-            key=f"rating_{_slug(item['title'])}",
-        )
-        ratings[item["title"]] = rating
-
-    st.space("small")
-    if st.button(":material/recommend: Get recommendations", type="primary", key="stage2_next"):
-        with st.spinner("Applying relevance feedback…"):
-            final = apply_user_feedback(
-                original_query_vector=st.session_state.query_vector,
-                rated_items=ratings,
-                candidate_pool=st.session_state.initial_pool,
-                top_k=_TOP_K,
-            )
-        st.session_state.final_results = final
-        _go_to(3)
-    col_back, col_reset = st.columns(2)
-    with col_back:
-        if st.button(":material/arrow_back: Back", key="stage2_back"):
-            _go_to(1)
-    with col_reset:
-        if st.button(":material/restart_alt: Start over", key="stage2_reset"):
-            _reset()
-
-
-def _sidebar_stage_3() -> None:
-    st.html(
-        f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
-    )
-    n = len(
-        st.session_state.final_results
-        if st.session_state.seen_labels
-        else st.session_state.top_k_results
-    )
-    st.caption(f"{n} recommendation{'s' if n != 1 else ''} found.")
-    st.space("small")
-    if st.button(":material/search: New search", type="primary", key="stage3_reset"):
-        _reset()
-
-
-def _render_sidebar() -> None:
-    with st.sidebar:
-        st.html(
-            '<div class="scr-brand">🎬 Smart Recommender</div>'
-            '<div class="scr-tagline">Find your next binge.</div>'
-        )
-        st.divider()
-        sidebar_fn = {
-            0: _sidebar_stage_0,
-            1: _sidebar_stage_1,
-            2: _sidebar_stage_2,
-            3: _sidebar_stage_3,
-        }
-        sidebar_fn[st.session_state.stage]()
-
-
 # ─── Main area ────────────────────────────────────────────────────────────────
 
 def _pool_thumbs_html(items: list[dict], limit: int = 30) -> str:
@@ -687,6 +558,40 @@ def _main_stage_0() -> None:
   </p>
 </div>
 """)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        query = st.text_input(
+            "What are you in the mood for?",
+            placeholder="e.g. relaxing comedy about friends in New York",
+            key="query_input",
+        )
+        safe_search = st.toggle(
+            "Family-friendly only",
+            value=False,
+            key="safe_search_toggle",
+        )
+        st.space("small")
+        if st.button(
+            ":material/search: Search",
+            type="primary",
+            disabled=not query.strip(),
+            key="search_btn",
+        ):
+            with st.spinner("Searching…"):
+                result = semantic_search(
+                    query.strip(),
+                    top_k=_TOP_K,
+                    pool_size=_POOL_SIZE,
+                    model=_get_model(),
+                    collection=_get_collection(),
+                    safe_search=safe_search,
+                )
+            st.session_state.query = query.strip()
+            st.session_state.safe_search = safe_search
+            st.session_state.initial_pool = result["initial_pool"]
+            st.session_state.top_k_results = result["top_k_results"]
+            st.session_state.query_vector = result["query_vector"]
+            _go_to(1)
 
 
 def _main_stage_1() -> None:
@@ -695,10 +600,37 @@ def _main_stage_1() -> None:
     st.html(f"""
 <div class="scr-results-header">
   <p class="scr-results-title">Found {len(pool)} matches</p>
-  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — mark titles you've seen in the sidebar.</p>
+  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — mark any titles you've already seen below.</p>
 </div>
 """)
     st.html(_pool_thumbs_html(pool))
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.html(
+            f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
+        )
+        st.caption(
+            "Select titles you've already seen — we'll use your ratings to personalise results. "
+            "Skip to get recommendations straight away."
+        )
+        options = [_display_label(item) for item in st.session_state.initial_pool]
+        seen = st.multiselect(
+            "Already seen:",
+            options=options,
+            key="seen_multiselect",
+            label_visibility="visible",
+        )
+        st.space("small")
+        next_label = ":material/star: Rate seen items" if seen else ":material/recommend: Get recommendations"
+        if st.button(next_label, type="primary", key="stage1_next"):
+            st.session_state.seen_labels = seen
+            if seen:
+                _go_to(2)
+            else:
+                st.session_state.final_results = []
+                _go_to(3)
+        if st.button(":material/restart_alt: Start over", key="stage1_reset"):
+            _reset()
 
 
 def _main_stage_2() -> None:
@@ -710,12 +642,51 @@ def _main_stage_2() -> None:
     st.html(f"""
 <div class="scr-results-header">
   <p class="scr-results-title">Rating {len(seen_labels)} title{"s" if len(seen_labels) != 1 else ""}</p>
-  <p class="scr-results-meta">Adjust the sliders in the sidebar, then get your recommendations.</p>
+  <p class="scr-results-meta">Adjust the sliders below, then get your recommendations.</p>
 </div>
 """)
     rated_items = [label_to_item[l] for l in seen_labels if l in label_to_item]
     if rated_items:
         st.html(_pool_thumbs_html(rated_items, limit=len(rated_items)))
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.html(
+            f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
+        )
+        st.caption("Rate 1–10. High scores pull results toward similar content; low scores push away.")
+        ratings: dict[str, int] = {}
+        for label in st.session_state.seen_labels:
+            item = label_to_item.get(label)
+            if item is None:
+                continue
+            st.write(label)
+            rating = st.radio(
+                label,
+                options=list(range(1, 11)),
+                index=4,
+                horizontal=True,
+                key=f"rating_{_slug(item['title'])}",
+                label_visibility="collapsed",
+            )
+            ratings[item["title"]] = rating
+        st.space("small")
+        if st.button(":material/recommend: Get recommendations", type="primary", key="stage2_next"):
+            with st.spinner("Applying relevance feedback…"):
+                final = apply_user_feedback(
+                    original_query_vector=st.session_state.query_vector,
+                    rated_items=ratings,
+                    candidate_pool=st.session_state.initial_pool,
+                    top_k=_TOP_K,
+                )
+            st.session_state.final_results = final
+            _go_to(3)
+        col_back, col_reset = st.columns(2)
+        with col_back:
+            if st.button(":material/arrow_back: Back", key="stage2_back"):
+                _go_to(1)
+        with col_reset:
+            if st.button(":material/restart_alt: Start over", key="stage2_reset"):
+                _reset()
 
 
 def _main_stage_3() -> None:
@@ -738,7 +709,7 @@ def _main_stage_3() -> None:
 """)
 
     if not results:
-        st.warning("No recommendations found. Try a different query in the sidebar.")
+        st.warning("No recommendations found. Try a different query.")
         return
 
     for rank, item in enumerate(results[:5], start=1):
@@ -757,10 +728,22 @@ def main() -> None:
         page_title="Smart Content Recommender",
         page_icon=":material/movie:",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
+    
     _inject_styles()
+    
+    # התיקון לסליידר ממוקם כאן כדי לדרוס כל עיצוב קודם
+    st.markdown("""
+        <style>
+            div[data-testid="stSlider"], 
+            div[data-testid="stSlider"] * {
+                direction: ltr !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     _init_state()
-    _render_sidebar()
 
     main_fn = {
         0: _main_stage_0,
