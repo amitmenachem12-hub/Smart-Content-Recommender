@@ -232,8 +232,8 @@ _STYLES = """
     flex: 1;
     line-height: 1.3;
     min-width: 0;
-    word-break: normal;
-    overflow-wrap: break-word;
+    word-break: normal !important;
+    overflow-wrap: anywhere !important;
 }
 .scr-card.scr-compact .scr-title { font-size: 15px; }
 .scr-meta {
@@ -393,7 +393,10 @@ _STYLES = """
 
 /* ── Mobile typography ─────────────────────────────────────────── */
 @media (max-width: 768px) {
-    .scr-title { font-size: 15px; }
+    .scr-title {
+        font-size: 1.1rem !important;
+        flex-basis: 100%;
+    }
 }
 </style>
 """
@@ -499,11 +502,11 @@ def _card_html(item: dict, rank: int, compact: bool = False) -> str:
 
 
 def _render_horizontal_card(item: dict, rank: int) -> None:
-    st.markdown(_card_html(item, rank, compact=False), unsafe_allow_html=True)
+    st.html(_card_html(item, rank, compact=False))
 
 
 def _render_result_card(item: dict, rank: int) -> None:
-    st.markdown(_card_html(item, rank, compact=True), unsafe_allow_html=True)
+    st.html(_card_html(item, rank, compact=True))
 
 
 # ─── Session state ────────────────────────────────────────────────────────────
