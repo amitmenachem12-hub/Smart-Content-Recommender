@@ -11,7 +11,7 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _CACHE_PATH = os.path.join(_DATA_DIR, "movies_cache.json")
 
 _COMMON_FIELDS = {"id", "overview", "genre_ids", "vote_average", "poster_path"}
-_PROVIDER_REGION = "US"
+_PROVIDER_REGION = "IL"
 
 
 def _auth_headers() -> dict[str, str]:
@@ -82,43 +82,67 @@ def fetch_watch_providers(tmdb_id: int, media_type: str, region: str = _PROVIDER
         return []
 
 
-def fetch_item_details(tmdb_id: int, media_type: str, language: str = "en-US") -> dict:
-    """Return localized title and overview for one item.
+def fetch_item_details(
+    tmdb_id: int, media_type: str, provider_region: str = _PROVIDER_REGION
+) -> dict:
+    """Fetch translations + IL streaming providers for one item.
 
-    If the requested language yields an empty title or overview, a second
-    request with 'en-US' is made to fill the gaps so cards are never blank.
-    Falls back to an empty dict on network or HTTP errors.
+    Uses append_to_response=watch/providers on the en-US call so no extra
+    round-trip is needed.  Hebrew fields fall back to English when TMDB
+    returns an empty string.
+
+    Returns title_en, title_he, overview_en, overview_he, watch_providers.
     """
     segment = "movie" if media_type == "Movie" else "tv"
     title_key = "title" if media_type == "Movie" else "name"
 
-    def _get(lang: str) -> dict:
+    def _fetch(lang: str, extra: dict | None = None) -> dict:
         try:
-            response = requests.get(
+            resp = requests.get(
                 f"{_BASE_URL}/{segment}/{tmdb_id}",
                 headers=_auth_headers(),
-                params={"language": lang},
+                params={"language": lang, **(extra or {})},
                 timeout=10,
             )
-            response.raise_for_status()
-            data = response.json()
-            return {
-                "title": data.get(title_key) or "",
-                "overview": data.get("overview") or "",
-            }
+            resp.raise_for_status()
+            return resp.json()
         except Exception:
             return {}
 
-    result = _get(language)
+    en = _fetch("en-US", {"append_to_response": "videos,watch/providers"})
+    he = _fetch("he-IL")
 
-    if language != "en-US" and (not result.get("title") or not result.get("overview")):
-        fallback = _get("en-US")
-        result = {
-            "title": result.get("title") or fallback.get("title", ""),
-            "overview": result.get("overview") or fallback.get("overview", ""),
-        }
+    region_data = (
+        en.get("watch/providers", {})
+          .get("results", {})
+          .get(provider_region, {})
+    )
+    providers = [
+        {"name": p["provider_name"], "logo_path": p.get("logo_path", "")}
+        for p in region_data.get("flatrate", [])
+    ]
 
-    return result
+    videos = en.get("videos", {}).get("results", [])
+    # Prefer the first official YouTube trailer; fall back to any YouTube trailer.
+    trailer_key: str | None = next(
+        (v["key"] for v in videos if v.get("site") == "YouTube" and v.get("type") == "Trailer" and v.get("official")),
+        None,
+    ) or next(
+        (v["key"] for v in videos if v.get("site") == "YouTube" and v.get("type") == "Trailer"),
+        None,
+    )
+
+    title_en = en.get(title_key) or ""
+    overview_en = en.get("overview") or ""
+
+    return {
+        "title_en": title_en,
+        "overview_en": overview_en,
+        "title_he": he.get(title_key) or title_en,
+        "overview_he": he.get("overview") or overview_en,
+        "watch_providers": providers,
+        "trailer_key": trailer_key,
+    }
 
 
 def fetch_certification(tmdb_id: int, media_type: str) -> str:

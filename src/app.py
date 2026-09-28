@@ -17,7 +17,6 @@ _POOL_SIZE = 100
 _TOP_K = 10
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 _TMDB_LOGO_BASE = "https://image.tmdb.org/t/p/w45"
-_TMDB_THUMB_BASE = "https://image.tmdb.org/t/p/w92"
 
 
 @st.cache_resource
@@ -34,10 +33,6 @@ def _get_collection():
 
 def _slug(text: str) -> str:
     return re.sub(r"[^\w]", "_", text)
-
-
-def _display_label(item: dict) -> str:
-    return f"{item['title']} ({item.get('media_type', '?')})"
 
 
 def _genre_names(item: dict) -> list[str]:
@@ -93,206 +88,6 @@ _STYLES = """
     line-height: 1.65;
 }
 
-/* ── Step progress strip ───────────────────────────────────────── */
-.scr-steps {
-    display: flex;
-    margin-bottom: 24px;
-    background: rgba(14,14,40,.65);
-    border: 1px solid rgba(124,58,237,.14);
-    border-radius: 10px;
-    overflow: hidden;
-}
-.scr-step {
-    flex: 1;
-    text-align: center;
-    padding: 10px 6px;
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(226,232,240,.28);
-    letter-spacing: .5px;
-    text-transform: uppercase;
-    border-right: 1px solid rgba(124,58,237,.1);
-}
-.scr-step:last-child { border-right: none; }
-.scr-step.done  { color: rgba(196,181,253,.5); }
-.scr-step.active {
-    background: rgba(124,58,237,.18);
-    color: #C4B5FD;
-}
-
-/* ── Results header ────────────────────────────────────────────── */
-.scr-results-header { margin-bottom: 22px; }
-.scr-results-title {
-    font-size: 26px;
-    font-weight: 700;
-    color: #E2E8F0;
-    margin: 0 0 4px;
-}
-.scr-results-meta {
-    font-size: 14px;
-    color: rgba(167,139,250,.72);
-    margin: 0;
-}
-
-/* ── Card ──────────────────────────────────────────────────────── */
-.scr-card {
-    display: flex;
-    background: rgba(12,12,38,.84);
-    border-radius: 16px;
-    border: 1px solid rgba(124,58,237,.18);
-    overflow: hidden;
-    margin-bottom: 20px;
-    transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
-    box-shadow: 0 6px 28px rgba(0,0,0,.46);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    cursor: default;
-}
-.scr-card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 18px 52px rgba(0,0,0,.65),
-                0 4px 18px rgba(124,58,237,.30);
-    border-color: rgba(124,58,237,.50);
-}
-
-/* ── Compact card override ─────────────────────────────────────── */
-.scr-card.scr-compact {
-    border-radius: 12px;
-    margin-bottom: 14px;
-    box-shadow: 0 3px 14px rgba(0,0,0,.38);
-    background: rgba(12,12,38,.72);
-    border-color: rgba(124,58,237,.13);
-}
-.scr-card.scr-compact:hover {
-    box-shadow: 0 10px 28px rgba(0,0,0,.55),
-                0 2px 10px rgba(124,58,237,.22);
-    border-color: rgba(124,58,237,.40);
-}
-
-/* ── Poster ────────────────────────────────────────────────────── */
-.scr-poster {
-    width: 130px;
-    min-width: 130px;
-    height: 195px;
-    object-fit: cover;
-    flex-shrink: 0;
-    display: block;
-}
-.scr-poster-ph {
-    width: 130px;
-    min-width: 130px;
-    height: 195px;
-    background: rgba(124,58,237,.09);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    font-size: 36px;
-    opacity: .45;
-}
-.scr-card.scr-compact .scr-poster,
-.scr-card.scr-compact .scr-poster-ph {
-    width: 82px;
-    min-width: 82px;
-    height: 123px;
-}
-.scr-card.scr-compact .scr-poster-ph { font-size: 26px; }
-
-/* ── Card body ─────────────────────────────────────────────────── */
-.scr-body {
-    padding: 20px 24px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-}
-.scr-card.scr-compact .scr-body { padding: 14px 18px; gap: 5px; }
-
-/* ── Header row ────────────────────────────────────────────────── */
-.scr-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-.scr-rank {
-    font-size: 11px;
-    font-weight: 700;
-    color: #C4B5FD;
-    background: rgba(124,58,237,.18);
-    border-radius: 5px;
-    padding: 3px 8px;
-    flex-shrink: 0;
-    margin-top: 3px;
-    letter-spacing: .3px;
-}
-.scr-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #F1F0FF;
-    margin: 0;
-    flex: 1;
-    line-height: 1.3;
-    min-width: 0;
-    word-break: normal !important;
-    overflow-wrap: anywhere !important;
-}
-.scr-card.scr-compact .scr-title { font-size: 15px; }
-.scr-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-}
-
-/* ── Badge ─────────────────────────────────────────────────────── */
-.scr-badge {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .7px;
-    border-radius: 4px;
-    padding: 2px 8px;
-    background: rgba(124,58,237,.22);
-    color: #C4B5FD;
-    border: 1px solid rgba(124,58,237,.35);
-}
-.scr-badge-tv {
-    background: rgba(59,130,246,.18);
-    color: #93C5FD;
-    border-color: rgba(59,130,246,.32);
-}
-.scr-score {
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(226,232,240,.4);
-    font-variant-numeric: tabular-nums;
-}
-
-/* ── Genres, overview ──────────────────────────────────────────── */
-.scr-genres {
-    font-size: 13px;
-    color: rgba(196,181,253,.68);
-    letter-spacing: .1px;
-}
-.scr-overview {
-    font-size: 14px;
-    color: rgba(226,232,240,.68);
-    line-height: 1.65;
-    margin: 0;
-    flex: 1;
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-.scr-card.scr-compact .scr-overview {
-    -webkit-line-clamp: 2;
-    font-size: 13px;
-}
-
 /* ── Providers ─────────────────────────────────────────────────── */
 .scr-providers {
     display: flex;
@@ -310,59 +105,13 @@ _STYLES = """
     margin-right: 2px;
 }
 .scr-provider-logo {
-    width: 26px;
-    height: 26px;
-    border-radius: 5px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
     object-fit: cover;
     border: 1px solid rgba(255,255,255,.08);
 }
 .scr-provider-text { font-size: 12px; color: rgba(226,232,240,.52); }
-
-/* ── Justification callout ─────────────────────────────────────── */
-.scr-just {
-    font-size: 13px;
-    color: rgba(196,181,253,.82);
-    background: rgba(124,58,237,.10);
-    border-left: 3px solid rgba(124,58,237,.52);
-    border-radius: 0 6px 6px 0;
-    padding: 8px 12px;
-}
-
-/* ── Pool thumbnail grid ───────────────────────────────────────── */
-.scr-pool-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 4px 0 16px;
-}
-.scr-thumb {
-    width: 70px;
-    height: 105px;
-    border-radius: 8px;
-    object-fit: cover;
-    border: 1px solid rgba(124,58,237,.14);
-    transition: transform .15s ease, border-color .15s ease;
-    flex-shrink: 0;
-    vertical-align: top;
-}
-.scr-thumb:hover {
-    transform: scale(1.08);
-    border-color: rgba(124,58,237,.5);
-}
-.scr-thumb-ph {
-    width: 70px;
-    height: 105px;
-    border-radius: 8px;
-    background: rgba(124,58,237,.08);
-    border: 1px solid rgba(124,58,237,.12);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    opacity: .38;
-    flex-shrink: 0;
-    vertical-align: top;
-}
 
 .scr-sidebar-query {
     background: rgba(124,58,237,.11);
@@ -377,12 +126,19 @@ _STYLES = """
     line-height: 1.5;
 }
 
-/* ── Mobile typography ─────────────────────────────────────────── */
+/* ── Footer ─────────────────────────────────────────────────────── */
+.scr-footer {
+    margin-top: 16px;
+    margin-bottom: 48px; /* clears Streamlit's fixed running-indicator area */
+    text-align: center;
+    font-size: 11px;
+    color: rgba(226,232,240,.28);
+    line-height: 1.5;
+}
+
+/* ── Mobile ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-    .scr-title {
-        font-size: 1.1rem !important;
-        flex-basis: 100%;
-    }
+    .scr-hero-title { font-size: 36px; }
 }
 </style>
 """
@@ -393,20 +149,6 @@ def _inject_styles() -> None:
 
 
 # ─── HTML helpers ─────────────────────────────────────────────────────────────
-
-def _steps_html(active: int) -> str:
-    labels = ["Search", "Filter", "Rate", "Results"]
-    parts = []
-    for i, label in enumerate(labels, 1):
-        if i < active:
-            cls = "scr-step done"
-        elif i == active:
-            cls = "scr-step active"
-        else:
-            cls = "scr-step"
-        parts.append(f'<div class="{cls}">{label}</div>')
-    return f'<div class="scr-steps">{"".join(parts)}</div>'
-
 
 def _provider_logos_html(item: dict) -> str:
     providers = item.get("watch_providers", [])
@@ -434,65 +176,71 @@ def _provider_logos_html(item: dict) -> str:
     )
 
 
-def _poster_img_html(item: dict) -> str:
-    path = item.get("poster_path", "")
-    title = _esc(item.get("title", ""))
-    if path:
-        url = f"{_TMDB_IMAGE_BASE}/{path.lstrip('/')}"
-        return f'<img src="{url}" class="scr-poster" alt="{title} poster">'
-    return '<div class="scr-poster-ph">🎬</div>'
+# ─── Trailer dialog ───────────────────────────────────────────────────────────
+
+@st.dialog("Watch Trailer", width="large")
+def _trailer_dialog() -> None:
+    key = st.session_state.get("_trailer_key", "")
+    if key:
+        st.video(f"https://www.youtube.com/watch?v={key}")
 
 
-def _card_html(item: dict, rank: int, compact: bool = False) -> str:
-    score = item.get("feedback_score", item.get("score", 0.0))
-    genres = _genre_names(item)
-    title = _esc(item.get("title", ""))
+# ─── Card rendering ───────────────────────────────────────────────────────────
+
+def _render_card(
+    item: dict,
+    rank: int,
+    *,
+    show_rating: bool = False,
+    rating_key: str | None = None,
+) -> None:
+    lang = st.session_state.get("lang", "en")
+    title = item.get(f"title_{lang}") or item.get("title", "")
+    overview = item.get(f"overview_{lang}") or item.get("overview", "")
+    synopsis = (overview[:130] + "…") if len(overview) > 130 else overview
     media_type = item.get("media_type", "?")
-    overview = _esc(item.get("overview", ""))
+    genres = _genre_names(item)
+    type_color = "blue" if media_type == "tv" else "violet"
 
-    genre_html = (
-        f'<div class="scr-genres">{" · ".join(_esc(g) for g in genres)}</div>'
-        if genres else ""
-    )
-    just_html = ""
-    if item.get("justification"):
-        genre_str = ", ".join(genres) if genres else ""
-        clean_just = (
-            f"Recommended because it strongly matches your intent and features genres: {genre_str}"
-            if genre_str
-            else "Recommended because it strongly matches your intent"
-        )
-        just_html = f'<div class="scr-just">💡 {_esc(clean_just)}</div>'
-
-    badge_cls = f"scr-badge scr-badge-{_esc(media_type)}"
-    card_cls = "scr-card scr-compact" if compact else "scr-card"
-
-    return f"""
-<div class="{card_cls}">
-  {_poster_img_html(item)}
-  <div class="scr-body">
-    <div class="scr-header">
-      <span class="scr-rank">#{rank}</span>
-      <span class="scr-title">{title}</span>
-      <div class="scr-meta">
-        <span class="{badge_cls}">{_esc(media_type)}</span>
-        <span class="scr-score">{score:.2f}</span>
-      </div>
-    </div>
-    {genre_html}
-    <p class="scr-overview">{overview}</p>
-    {_provider_logos_html(item)}
-    {just_html}
-  </div>
-</div>"""
-
-
-def _render_horizontal_card(item: dict, rank: int) -> None:
-    st.html(_card_html(item, rank, compact=False))
-
-
-def _render_result_card(item: dict, rank: int) -> None:
-    st.html(_card_html(item, rank, compact=True))
+    with st.container(border=True):
+        img_col, info_col = st.columns([1, 3])
+        with img_col:
+            path = item.get("poster_path", "")
+            if path:
+                st.image(f"{_TMDB_IMAGE_BASE}/{path.lstrip('/')}")
+            else:
+                st.markdown(":material/movie:")
+        with info_col:
+            st.markdown(
+                f"**#{rank} · {title}** &nbsp;:{type_color}[{media_type.upper()}]"
+            )
+            if genres:
+                st.caption(" · ".join(genres[:3]))
+            if synopsis:
+                st.caption(synopsis)
+            providers_html = _provider_logos_html(item)
+            if providers_html:
+                st.html(providers_html)
+            else:
+                st.caption(":material/block: Not available for streaming in your region")
+            if item.get("justification") and not show_rating:
+                g_str = " · ".join(genres[:2]) if genres else ""
+                st.caption(
+                    f":material/auto_awesome: {g_str}"
+                    if g_str
+                    else ":material/auto_awesome: Strong semantic match"
+                )
+            trailer_key = item.get("trailer_key")
+            if trailer_key:
+                item_slug = _slug(str(item.get("id", rank)))
+                if st.button(
+                    ":material/play_circle: Watch Trailer",
+                    key=f"trailer_{item_slug}",
+                ):
+                    st.session_state["_trailer_key"] = trailer_key
+                    _trailer_dialog()
+            if show_rating and rating_key:
+                st.feedback(options="stars", key=rating_key)
 
 
 # ─── Session state ────────────────────────────────────────────────────────────
@@ -505,8 +253,7 @@ def _init_state() -> None:
         "initial_pool": [],
         "top_k_results": [],
         "query_vector": None,
-        "seen_labels": [],
-        "final_results": [],
+        "final_recs": [],
         "lang": "en",
     }
     for k, v in defaults.items():
@@ -525,41 +272,84 @@ def _go_to(stage: int) -> None:
     st.rerun()
 
 
-# ─── Main area ────────────────────────────────────────────────────────────────
+# ─── Enrichment ───────────────────────────────────────────────────────────────
 
-def _pool_thumbs_html(items: list[dict], limit: int = 30) -> str:
-    thumbs = []
-    for item in items[:limit]:
-        path = item.get("poster_path", "")
-        title = _esc(item.get("title", ""))
-        if path:
-            url = f"{_TMDB_THUMB_BASE}/{path.lstrip('/')}"
-            thumbs.append(
-                f'<img src="{url}" title="{title}" class="scr-thumb" alt="{title}">'
-            )
-        else:
-            thumbs.append('<span class="scr-thumb-ph">🎬</span>')
-    return f'<div class="scr-pool-grid">{"".join(thumbs)}</div>'
-
-
-def _localize_results(items: list[dict], language: str) -> list[dict]:
-    """Overlay localized title/overview from TMDB; falls back to English on missing translation."""
-    if language == "en-US":
-        return items
-
-    def _fetch_one(item: dict) -> dict:
+def _enrich_with_translations(items: list[dict]) -> list[dict]:
+    """Fetch translations + IL watch providers from TMDB for each item."""
+    def _enrich_one(item: dict) -> dict:
         numeric_id = int(str(item["id"]).rsplit("_", 1)[-1])
-        details = fetch_item_details(numeric_id, item["media_type"], language=language)
-        updated = dict(item)
-        if details.get("title"):
-            updated["title"] = details["title"]
-        if details.get("overview"):
-            updated["overview"] = details["overview"]
-        return updated
+        details = fetch_item_details(numeric_id, item["media_type"])
+        return {
+            **item,
+            "title_en": details.get("title_en") or item.get("title", ""),
+            "title_he": details.get("title_he") or item.get("title", ""),
+            "overview_en": details.get("overview_en") or item.get("overview", ""),
+            "overview_he": details.get("overview_he") or item.get("overview", ""),
+            "watch_providers": details.get("watch_providers", item.get("watch_providers", [])),
+            "trailer_key": details.get("trailer_key"),
+        }
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        return list(executor.map(_fetch_one, items))
+        return list(executor.map(_enrich_one, items))
 
+
+# ─── Rating helpers ───────────────────────────────────────────────────────────
+
+def _collect_ratings() -> dict[str, int]:
+    """Read all star ratings from session state; returns title → 1-5 score."""
+    ratings: dict[str, int] = {}
+    for item in st.session_state.get("initial_pool", []):
+        val = st.session_state.get(f"rating_{_slug(str(item['id']))}")
+        if val is not None:
+            ratings[item["title"]] = val + 1  # st.feedback 0-indexed (0–4) → 1–5
+    return ratings
+
+
+def _header_row(t: dict) -> None:
+    """Query pill + start-over button, shared by stage 1 and 2."""
+    hdr_col, reset_col = st.columns([5, 1])
+    with hdr_col:
+        st.html(
+            f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
+        )
+    with reset_col:
+        st.space("small")
+        if st.button(t["start_over"], key="header_reset"):
+            _reset()
+
+
+def _provider_filter(display_recs: list[dict], t: dict) -> list[dict]:
+    """Render provider multiselect and return the filtered list."""
+    all_providers = sorted({
+        p["name"]
+        for item in display_recs
+        for p in item.get("watch_providers", [])
+        if p.get("name")
+    })
+    if not all_providers:
+        return display_recs
+
+    if "provider_filter" in st.session_state:
+        st.session_state.provider_filter = [
+            p for p in st.session_state.provider_filter if p in all_providers
+        ]
+    st.multiselect(
+        t["provider_filter_label"],
+        options=all_providers,
+        key="provider_filter",
+        placeholder=t["provider_filter_placeholder"],
+    )
+
+    selected: list[str] = st.session_state.get("provider_filter", [])
+    if selected:
+        display_recs = [
+            item for item in display_recs
+            if any(p["name"] in selected for p in item.get("watch_providers", []))
+        ]
+    return display_recs
+
+
+# ─── Stage renderers ─────────────────────────────────────────────────────────
 
 def _main_stage_0() -> None:
     t = UI_TEXT[st.session_state.lang]
@@ -598,142 +388,93 @@ def _main_stage_0() -> None:
                     collection=_get_collection(),
                     safe_search=safe_search,
                 )
-                tmdb_lang = "he-IL" if st.session_state.lang == "he" else "en-US"
-                result["initial_pool"] = _localize_results(result["initial_pool"], tmdb_lang)
-                result["top_k_results"] = _localize_results(result["top_k_results"], tmdb_lang)
+                result["initial_pool"] = _enrich_with_translations(result["initial_pool"])
+                trans_map = {
+                    item["id"]: {
+                        k: item[k]
+                        for k in ("title_en", "title_he", "overview_en", "overview_he", "watch_providers", "trailer_key")
+                        if k in item
+                    }
+                    for item in result["initial_pool"]
+                }
+                result["top_k_results"] = [
+                    {**item, **trans_map.get(item["id"], {})}
+                    for item in result["top_k_results"]
+                ]
             st.session_state.query = query.strip()
             st.session_state.safe_search = safe_search
             st.session_state.initial_pool = result["initial_pool"]
             st.session_state.top_k_results = result["top_k_results"]
             st.session_state.query_vector = result["query_vector"]
+            st.session_state.final_recs = []
+            st.session_state.provider_filter = []
             _go_to(1)
 
 
 def _main_stage_1() -> None:
+    """Phase 1: show initial candidates for rating. Rocchio runs on button click."""
     t = UI_TEXT[st.session_state.lang]
-    pool = st.session_state.initial_pool
-    st.html(_steps_html(active=2))
-    st.html(f"""
-<div class="scr-results-header">
-  <p class="scr-results-title">{_esc(t["stage1_found"].format(n=len(pool)))}</p>
-  <p class="scr-results-meta">For &ldquo;{_esc(st.session_state.query)}&rdquo; — {_esc(t["stage1_mark_hint"])}</p>
-</div>
-""")
-    st.html(_pool_thumbs_html(pool))
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.html(
-            f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
-        )
-        st.caption(t["stage1_caption"])
-        options = [_display_label(item) for item in st.session_state.initial_pool]
-        seen = st.multiselect(
-            t["stage1_seen_label"],
-            options=options,
-            key="seen_multiselect",
-            label_visibility="visible",
-        )
-        st.space("small")
-        next_label = t["stage1_rate_btn"] if seen else t["stage1_rec_btn"]
-        if st.button(next_label, type="primary", key="stage1_next"):
-            st.session_state.seen_labels = seen
-            if seen:
-                _go_to(2)
-            else:
-                st.session_state.final_results = []
-                _go_to(3)
-        if st.button(t["stage1_start_over"], key="stage1_reset"):
-            _reset()
+    _header_row(t)
+
+    st.markdown(f"#### {t['rate_section_title']}")
+    st.caption(t["rate_section_caption"])
+    st.space("small")
+
+    for i, item in enumerate(st.session_state.top_k_results, start=1):
+        rating_key = f"rating_{_slug(str(item['id']))}"
+        _render_card(item, rank=i, show_rating=True, rating_key=rating_key)
+
+    st.divider()
+
+    _, btn_col, _ = st.columns([1, 2, 1])
+    with btn_col:
+        if st.button(t["get_recs_button"], type="primary", key="get_recs"):
+            ratings = _collect_ratings()
+            # Oversample so filtering phase-1 IDs still leaves _TOP_K results.
+            # Rocchio needs the full pool (including rated items) to compute the
+            # shifted vector; we exclude phase-1 IDs only from the output.
+            phase1_ids = {item["id"] for item in st.session_state.top_k_results}
+            recs_raw = apply_user_feedback(
+                original_query_vector=st.session_state.query_vector,
+                rated_items=ratings,
+                candidate_pool=st.session_state.initial_pool,
+                top_k=_TOP_K * 2,
+            )
+            st.session_state.final_recs = [
+                r for r in recs_raw if r["id"] not in phase1_ids
+            ][:_TOP_K]
+            st.session_state.provider_filter = []
+            _go_to(2)
 
 
 def _main_stage_2() -> None:
-    seen_labels = st.session_state.seen_labels
-    pool = st.session_state.initial_pool
-    label_to_item = {_display_label(i): i for i in pool}
+    """Phase 2: show final personalized recommendations, all phase-1 IDs excluded."""
+    t = UI_TEXT[st.session_state.lang]
+    _header_row(t)
 
-    st.html(_steps_html(active=3))
-    st.html(f"""
-<div class="scr-results-header">
-  <p class="scr-results-title">Rating {len(seen_labels)} title{"s" if len(seen_labels) != 1 else ""}</p>
-  <p class="scr-results-meta">Adjust the sliders below, then get your recommendations.</p>
-</div>
-""")
-    rated_items = [label_to_item[l] for l in seen_labels if l in label_to_item]
-    if rated_items:
-        st.html(_pool_thumbs_html(rated_items, limit=len(rated_items)))
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.html(
-            f'<div class="scr-sidebar-query">"{_esc(st.session_state.query)}"</div>'
-        )
-        st.caption("Rate 1–10. High scores pull results toward similar content; low scores push away.")
-        ratings: dict[str, int] = {}
-        for label in st.session_state.seen_labels:
-            item = label_to_item.get(label)
-            if item is None:
-                continue
-            st.write(label)
-            rating = st.radio(
-                label,
-                options=list(range(1, 11)),
-                index=4,
-                horizontal=True,
-                key=f"rating_{_slug(item['title'])}",
-                label_visibility="collapsed",
-            )
-            ratings[item["title"]] = rating
-        st.space("small")
-        if st.button(":material/recommend: Get recommendations", type="primary", key="stage2_next"):
-            with st.spinner("Applying relevance feedback…"):
-                final = apply_user_feedback(
-                    original_query_vector=st.session_state.query_vector,
-                    rated_items=ratings,
-                    candidate_pool=st.session_state.initial_pool,
-                    top_k=_TOP_K,
-                )
-                tmdb_lang = "he-IL" if st.session_state.lang == "he" else "en-US"
-                final = _localize_results(final, tmdb_lang)
-            st.session_state.final_results = final
-            _go_to(3)
-        col_back, col_reset = st.columns(2)
-        with col_back:
-            if st.button(":material/arrow_back: Back", key="stage2_back"):
-                _go_to(1)
-        with col_reset:
-            if st.button(":material/restart_alt: Start over", key="stage2_reset"):
-                _reset()
-
-
-def _main_stage_3() -> None:
-    had_feedback = bool(st.session_state.seen_labels)
-    if had_feedback:
-        heading = "Your personalised picks"
-        meta = "Re-ranked via Rocchio relevance feedback on your ratings."
-        results = st.session_state.final_results
+    st.markdown(f"#### {t['final_recs_title']}")
+    ratings = _collect_ratings()
+    n = len(ratings)
+    if n:
+        st.caption(t["final_recs_caption_rated"].format(n=n, s="" if n == 1 else "s"))
     else:
-        heading = "Top recommendations"
-        meta = f"Semantic search for \"{_esc(st.session_state.query)}\""
-        results = st.session_state.top_k_results
+        st.caption(t["final_recs_caption_no_ratings"])
+    st.space("small")
 
-    st.html(_steps_html(active=4))
-    st.html(f"""
-<div class="scr-results-header">
-  <p class="scr-results-title">{_esc(heading)}</p>
-  <p class="scr-results-meta">{meta}</p>
-</div>
-""")
+    display_recs = list(st.session_state.get("final_recs", []))
 
-    if not results:
-        st.warning("No recommendations found. Try a different query.")
+    if not display_recs:
+        st.info("No recommendations found — try a different search.")
         return
 
-    for rank, item in enumerate(results[:5], start=1):
-        _render_horizontal_card(item, rank)
+    display_recs = _provider_filter(display_recs, t)
 
-    if len(results) > 5:
-        st.markdown("##### More picks")
-        for rank, item in enumerate(results[5:], start=6):
-            _render_result_card(item, rank)
+    if not display_recs:
+        st.info(t["no_provider_matches"])
+        return
+
+    for rank, item in enumerate(display_recs, start=1):
+        _render_card(item, rank=rank)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
@@ -745,22 +486,19 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="collapsed",
     )
-    
+
     _inject_styles()
     _init_state()
 
     _, lang_col = st.columns([4, 1])
     with lang_col:
-        chosen = st.segmented_control(
+        st.segmented_control(
             UI_TEXT[st.session_state.lang]["lang_toggle"],
             options=["en", "he"],
             default=st.session_state.lang,
             format_func=lambda x: x.upper(),
-            key="lang_ctrl",
+            key="lang",
         )
-    if chosen and chosen != st.session_state.lang:
-        st.session_state.lang = chosen
-        st.rerun()
 
     if st.session_state.lang == "he":
         st.markdown("""
@@ -776,17 +514,6 @@ def main() -> None:
     direction: ltr;
 }
 
-/* Preserve horizontal radio buttons (1–10 rating scale) */
-[data-testid="stRadio"],
-[data-testid="stRadio"] > div {
-    direction: ltr !important;
-    flex-direction: row !important;
-}
-[data-testid="stRadio"] label {
-    direction: ltr;
-    text-align: left;
-}
-
 /* Keep exception tracebacks and code blocks readable (LTR) */
 .stException, .stException *,
 code, pre {
@@ -800,9 +527,12 @@ code, pre {
         0: _main_stage_0,
         1: _main_stage_1,
         2: _main_stage_2,
-        3: _main_stage_3,
     }
     main_fn[st.session_state.stage]()
+
+    st.html(
+        f'<div class="scr-footer">{_esc(UI_TEXT[st.session_state.lang]["footer"])}</div>'
+    )
 
 
 if __name__ == "__main__":
