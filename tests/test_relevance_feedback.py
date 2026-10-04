@@ -3,13 +3,13 @@
 Uses 3-D mock vectors — no sentence-transformer needed.
 
 Rating scale: 1–5
-  >= 4  →  positive  (pulls query toward the group's mean embedding, weight β=0.7)
+  >= 4  →  positive  (pulls query toward liked items, weight β·(rating−3)/2, β=0.8)
   <= 2  →  negative  (pushes query away, weight γ=0.3)
   == 3  →  neutral   (ignored; triggers fallback to original score sort)
 
-Rocchio formula:
-  V_new = α·V_query + β·mean(V_positive) − γ·mean(V_negative),  then L2-normalised.
-  Defaults: α=1.0, β=0.7, γ=0.3.
+Rocchio formula (all embeddings L2-normalised first):
+  V_new = α·V_query + β·Σ(wᵢ·V_posᵢ)/|pos| − γ·mean(V_negative),  then L2-normalised.
+  Defaults: α=1.0, β=0.8, γ=0.3.
 
 Fixture layout (base_pool)
 --------------------------
@@ -18,8 +18,10 @@ Fixture layout (base_pool)
   "Alpha"  close to Pivot:  [0.3, 0.7, 0]
   "Beta"   close to query:  [0.9, 0.0, 0.1]
 
-  Positive (rating=5, β=0.7) → V_new = [1, 0.7, 0]/‖…‖
-    Alpha ≈ 0.850,  Beta ≈ 0.814  →  Alpha first
+  Positive (rating=5, w=1)   → V_new = [1, 0.8, 0]/‖…‖
+    Alpha ≈ 0.882,  Beta ≈ 0.776  →  Alpha first
+  Positive (rating=4, w=0.5) → V_new = [1, 0.4, 0]/‖…‖
+    Alpha ≈ 0.707,  Beta ≈ 0.923  →  Beta still first (weaker pull)
   Negative (rating=1, γ=0.3) → V_new = [1, −0.3, 0]/‖…‖
     Alpha ≈ 0.113,  Beta ≈ 0.951  →  Beta first
 
@@ -28,13 +30,13 @@ Fixture layout (mixed_pool)
   query       = [1, 0, 0]
   "GoodPivot" rated +5; emb = [0, 1, 0]  (y-axis)
   "BadPivot"  rated  1; emb = [0, 0, 1]  (z-axis)
-  V_new = [1, 0.7, −0.3]/‖…‖  →  MovieX(y)=0.557 > MovieY(z)=−0.239
+  V_new = [1, 0.8, −0.3]/‖…‖  →  MovieX(y) > MovieY(z)
 """
 
 import numpy as np
 import pytest
 
-from src.relevance_feedback import apply_user_feedback
+from src.relevance_feedback import apply_user_feedback, build_feedback_vector
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ def mixed_pool():
 class TestPositiveFeedback:
 
     def test_top_result_shifts_toward_liked_direction(self, base_pool):
-        """rating=5 → V_new=[1,0.7,0]/norm; Alpha (closer to Pivot) ranks #1."""
+        """rating=5 → V_new=[1,0.8,0]/norm; Alpha (closer to Pivot) ranks #1."""
         query, pool = base_pool
         results = apply_user_feedback(query, {"Pivot": 5}, pool, top_k=2)
         assert results[0]["title"] == "Alpha"
@@ -97,10 +99,46 @@ class TestPositiveFeedback:
         assert by_title["Alpha"] > by_title["Beta"]
 
     def test_minimum_positive_threshold_triggers_shift(self, base_pool):
-        """rating=4 (minimum positive boundary) must also shift Alpha above Beta."""
+        """rating=4 (minimum positive boundary) must still pull toward Pivot."""
         query, pool = base_pool
-        results = apply_user_feedback(query, {"Pivot": 4}, pool, top_k=2)
-        assert results[0]["title"] == "Alpha"
+        no_signal = build_feedback_vector(query, {}, pool)
+        four = build_feedback_vector(query, {"Pivot": 4}, pool)
+        assert no_signal is None
+        assert four[1] > 0
+
+    def test_five_star_pulls_harder_than_four_star(self, base_pool):
+        """Weight (rating−3)/2: a 5-star shifts the vector twice as hard as a 4-star."""
+        query, pool = base_pool
+        four = build_feedback_vector(query, {"Pivot": 4}, pool)
+        five = build_feedback_vector(query, {"Pivot": 5}, pool)
+        # y/x ratio of the unnormalised vector is exactly β·w.
+        assert four[1] / four[0] == pytest.approx(0.4)
+        assert five[1] / five[0] == pytest.approx(0.8)
+
+
+# ── vector properties ─────────────────────────────────────────────────────────
+
+
+class TestFeedbackVector:
+
+    def test_output_is_unit_length(self, mixed_pool):
+        query, pool = mixed_pool
+        vec = build_feedback_vector(query, {"GoodPivot": 5, "BadPivot": 1}, pool)
+        assert np.linalg.norm(vec) == pytest.approx(1.0)
+
+    def test_embedding_magnitude_does_not_inflate_shift(self, base_pool):
+        """Stored embeddings are not unit length; scaling one must not change the result."""
+        query, pool = base_pool
+        scaled = [{**p, "embedding": p["embedding"] * 3.5} for p in pool]
+        np.testing.assert_allclose(
+            build_feedback_vector(query, {"Pivot": 5}, pool),
+            build_feedback_vector(query, {"Pivot": 5}, scaled),
+            rtol=1e-6,
+        )
+
+    def test_neutral_only_returns_none(self, base_pool):
+        query, pool = base_pool
+        assert build_feedback_vector(query, {"Pivot": 3}, pool) is None
 
 
 # ── negative feedback (rating <= 2) ──────────────────────────────────────────

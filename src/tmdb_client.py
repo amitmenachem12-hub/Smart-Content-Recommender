@@ -145,6 +145,38 @@ def fetch_item_details(
     }
 
 
+def fetch_tmdb_similar(tmdb_id: int, media_type: str, max_results: int = 20) -> list[int]:
+    """Returns TMDB IDs from the /similar endpoint (genre/keyword-based thematic peers)."""
+    segment = "movie" if media_type == "Movie" else "tv"
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/{segment}/{tmdb_id}/similar",
+            headers=_auth_headers(),
+            params={"language": "en-US", "page": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return [r["id"] for r in resp.json().get("results", [])[:max_results]]
+    except Exception:
+        return []
+
+
+def fetch_tmdb_recommendations(tmdb_id: int, media_type: str, max_results: int = 10) -> list[int]:
+    """Returns TMDB IDs from the /recommendations endpoint (collaborative graph data)."""
+    segment = "movie" if media_type == "Movie" else "tv"
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/{segment}/{tmdb_id}/recommendations",
+            headers=_auth_headers(),
+            params={"language": "en-US", "page": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return [r["id"] for r in resp.json().get("results", [])[:max_results]]
+    except Exception:
+        return []
+
+
 def fetch_certification(tmdb_id: int, media_type: str) -> str:
     try:
         if media_type == "Movie":
@@ -175,6 +207,44 @@ def fetch_certification(tmdb_id: int, media_type: str) -> str:
     except Exception:
         pass
     return "Unrated"
+
+
+def fetch_discover_by_genres(
+    anchor_genre_ids: list[int],
+    banned_genre_ids: list[int],
+    media_type: str = "TV Show",
+    min_vote_count: int = 1500,
+    max_results: int = 40,
+) -> list[int]:
+    """Fetch popular TMDB IDs via /discover filtered by genre profile.
+
+    OR logic (pipe) on anchor IDs so any matching genre qualifies.
+    AND-exclusion (comma) on banned IDs so tone-shifting genres are removed.
+    vote_count threshold ensures only widely-known titles like HIMYM / New Girl
+    are returned, not obscure catalogue filler.
+    """
+    segment = "tv" if media_type == "TV Show" else "movie"
+    params: dict = {
+        "language": "en-US",
+        "sort_by": "popularity.desc",
+        "vote_count.gte": min_vote_count,
+        "page": 1,
+    }
+    if anchor_genre_ids:
+        params["with_genres"] = "|".join(str(g) for g in anchor_genre_ids)
+    if banned_genre_ids:
+        params["without_genres"] = ",".join(str(g) for g in banned_genre_ids)
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/discover/{segment}",
+            headers=_auth_headers(),
+            params=params,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return [r["id"] for r in resp.json().get("results", [])[:max_results]]
+    except Exception:
+        return []
 
 
 def fetch_and_cache_popular_movies(limit: int = 2000) -> list[dict]:

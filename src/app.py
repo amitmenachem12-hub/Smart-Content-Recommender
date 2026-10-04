@@ -1,5 +1,6 @@
 import concurrent.futures
 import html as html_module
+import json
 import os
 import re
 import sys
@@ -8,13 +9,23 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from relevance_feedback import apply_user_feedback
-from search_engine import load_collection, load_model, semantic_search
-from tmdb_client import fetch_item_details
+from relevance_feedback import build_feedback_vector
+from search_engine import (
+    get_hybrid_recommendations,
+    load_collection,
+    load_model,
+    semantic_search,
+)
+from tmdb_client import fetch_item_details, fetch_tmdb_recommendations
 from translations import UI_TEXT
 
 _POOL_SIZE = 100
 _TOP_K = 10
+_PHASE1_K = 24
+# Fetched deeper than _TOP_K so peers survive the frontend streaming-provider filter.
+_PHASE2_DEPTH = 40
+_ENRICHED_KEYS = ("title_en", "title_he", "overview_en", "overview_he", "watch_providers", "trailer_key")
+_GRID_COLS = 3
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 _TMDB_LOGO_BASE = "https://image.tmdb.org/t/p/w45"
 
@@ -187,13 +198,43 @@ def _trailer_dialog() -> None:
 
 # ─── Card rendering ───────────────────────────────────────────────────────────
 
-def _render_card(
-    item: dict,
-    rank: int,
-    *,
-    show_rating: bool = False,
-    rating_key: str | None = None,
-) -> None:
+def _render_trailer_button(item: dict, rank: int) -> None:
+    trailer_key = item.get("trailer_key")
+    if not trailer_key:
+        return
+    item_slug = _slug(str(item.get("id", rank)))
+    if st.button(
+        ":material/play_circle: Watch Trailer",
+        key=f"trailer_{item_slug}",
+        width="stretch",
+    ):
+        st.session_state["_trailer_key"] = trailer_key
+        _trailer_dialog()
+
+
+def _render_grid_card(item: dict, rank: int, rating_key: str) -> None:
+    """Vertically stacked card sized for a narrow grid column (Phase 1)."""
+    lang = st.session_state.get("lang", "en")
+    title = item.get(f"title_{lang}") or item.get("title", "")
+    overview = item.get(f"overview_{lang}") or item.get("overview", "")
+    synopsis = (overview[:90] + "…") if len(overview) > 90 else overview
+    media_type = item.get("media_type", "?")
+    type_color = "blue" if media_type == "tv" else "violet"
+
+    with st.container(border=True):
+        path = item.get("poster_path", "")
+        if path:
+            st.image(f"{_TMDB_IMAGE_BASE}/{path.lstrip('/')}", width="stretch")
+        else:
+            st.markdown(":material/movie:")
+        st.markdown(f"**#{rank} · {title}** &nbsp;:{type_color}[{media_type.upper()}]")
+        if synopsis:
+            st.caption(synopsis)
+        st.feedback(options="stars", key=rating_key)
+        _render_trailer_button(item, rank)
+
+
+def _render_card(item: dict, rank: int) -> None:
     lang = st.session_state.get("lang", "en")
     title = item.get(f"title_{lang}") or item.get("title", "")
     overview = item.get(f"overview_{lang}") or item.get("overview", "")
@@ -223,24 +264,14 @@ def _render_card(
                 st.html(providers_html)
             else:
                 st.caption(":material/block: Not available for streaming in your region")
-            if item.get("justification") and not show_rating:
+            if item.get("justification"):
                 g_str = " · ".join(genres[:2]) if genres else ""
                 st.caption(
                     f":material/auto_awesome: {g_str}"
                     if g_str
                     else ":material/auto_awesome: Strong semantic match"
                 )
-            trailer_key = item.get("trailer_key")
-            if trailer_key:
-                item_slug = _slug(str(item.get("id", rank)))
-                if st.button(
-                    ":material/play_circle: Watch Trailer",
-                    key=f"trailer_{item_slug}",
-                ):
-                    st.session_state["_trailer_key"] = trailer_key
-                    _trailer_dialog()
-            if show_rating and rating_key:
-                st.feedback(options="stars", key=rating_key)
+            _render_trailer_button(item, rank)
 
 
 # ─── Session state ────────────────────────────────────────────────────────────
@@ -293,7 +324,123 @@ def _enrich_with_translations(items: list[dict]) -> list[dict]:
         return list(executor.map(_enrich_one, items))
 
 
+def _merge_enrichment(items: list[dict], enriched: list[dict]) -> list[dict]:
+    by_id = {e["id"]: e for e in enriched}
+    return [
+        {**item, **{k: by_id[item["id"]][k] for k in _ENRICHED_KEYS if k in by_id.get(item["id"], {})}}
+        for item in items
+    ]
+
+
+# ─── Debug helpers ────────────────────────────────────────────────────────────
+
+def _items_from_ids(ids, collection) -> list[dict]:
+    """Fetch minimal item dicts (id/title/media_type/genres) for a list of composite IDs."""
+    if not ids:
+        return []
+    result = collection.get(ids=ids, include=["metadatas"])
+    return [
+        {
+            "id": doc_id,
+            "title": meta.get("title", ""),
+            "media_type": meta.get("media_type", ""),
+            "genres": json.loads(meta.get("genres_json", "[]")),
+        }
+        for doc_id, meta in zip(result["ids"], result["metadatas"])
+    ]
+
+
+def _chroma_items_for_vector(query_vec, collection, exclude_ids: set, n: int = 60) -> list[dict]:
+    """Top-n ChromaDB hits (phase-1 items excluded) as full item dicts."""
+    fetch_n = min(n, collection.count())
+    if fetch_n == 0:
+        return []
+    result = collection.query(
+        query_embeddings=[query_vec.tolist()],
+        n_results=fetch_n,
+        include=["metadatas"],
+    )
+    items = []
+    for doc_id, meta in zip(result["ids"][0], result["metadatas"][0]):
+        if doc_id in exclude_ids:
+            continue
+        items.append({
+            "id": doc_id,
+            "title": meta.get("title", ""),
+            "overview": meta.get("overview", ""),
+            "media_type": meta.get("media_type", ""),
+            "genres": json.loads(meta.get("genres_json", "[]")),
+            "vote_average": meta.get("vote_average", 0.0),
+            "poster_path": meta.get("poster_path", ""),
+            "watch_providers": json.loads(meta.get("watch_providers_json", "[]")),
+            "certification": meta.get("certification", "Unrated"),
+            "original_language": meta.get("original_language", ""),
+            "origin_country": json.loads(meta.get("origin_country_json", "[]")),
+        })
+    return items
+
+
 # ─── Rating helpers ───────────────────────────────────────────────────────────
+
+def _fetch_collab_rec_ids(items: list[dict], ratings: dict[str, int]) -> list[str]:
+    """Return deduplicated ChromaDB composite IDs from TMDB's /recommendations endpoint
+    for every item the user rated 4 or 5 stars.
+
+    /recommendations uses TMDB's collaborative-filtering graph, which captures actual
+    viewing patterns (e.g. Friends watchers also watch HIMYM) rather than keyword/genre
+    similarity.  20 candidates per anchor give the blocklist veto enough material to
+    work with while keeping API latency low.
+    """
+    highly_rated = [item for item in items if ratings.get(item["title"], 0) >= 4]
+    if not highly_rated:
+        return []
+
+    def _recs_for(item: dict) -> list[str]:
+        numeric_id = int(str(item["id"]).rsplit("_", 1)[-1])
+        prefix = "Movie" if item["media_type"] == "Movie" else "TV Show"
+        rec_ids = fetch_tmdb_recommendations(numeric_id, item["media_type"], max_results=20)
+        return [f"{prefix}_{rid}" for rid in rec_ids]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        batches = list(ex.map(_recs_for, highly_rated))
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for batch in batches:
+        for cid in batch:
+            if cid not in seen:
+                result.append(cid)
+                seen.add(cid)
+    return result
+
+
+def _anchor_genres(items: list[dict], ratings: dict[str, int]) -> set[str]:
+    """Primary genre name of each item rated 4 or 5 stars.
+    Used as the genre gate in _validate_tmdb_recs."""
+    genres: set[str] = set()
+    for item in items:
+        if ratings.get(item["title"], 0) < 4:
+            continue
+        item_genres = [g["name"] if isinstance(g, dict) else g for g in item.get("genres", [])]
+        if item_genres:
+            genres.add(item_genres[0])
+    return genres
+
+
+def _anchor_all_genres(items: list[dict], ratings: dict[str, int]) -> set[str]:
+    """ALL genre names from items rated 4 or 5 stars.
+    Used for the free-pass check: a TMDB rec whose entire genre list is a
+    subset of this set skips the vector similarity threshold."""
+    genres: set[str] = set()
+    for item in items:
+        if ratings.get(item["title"], 0) < 4:
+            continue
+        genres.update(
+            g["name"] if isinstance(g, dict) else g
+            for g in item.get("genres", [])
+        )
+    return genres
+
 
 def _collect_ratings() -> dict[str, int]:
     """Read all star ratings from session state; returns title → 1-5 score."""
@@ -382,25 +529,16 @@ def _main_stage_0() -> None:
             with st.spinner("Searching…"):
                 result = semantic_search(
                     query.strip(),
-                    top_k=_TOP_K,
+                    top_k=_PHASE1_K,
                     pool_size=_POOL_SIZE,
                     model=_get_model(),
                     collection=_get_collection(),
                     safe_search=safe_search,
                 )
                 result["initial_pool"] = _enrich_with_translations(result["initial_pool"])
-                trans_map = {
-                    item["id"]: {
-                        k: item[k]
-                        for k in ("title_en", "title_he", "overview_en", "overview_he", "watch_providers", "trailer_key")
-                        if k in item
-                    }
-                    for item in result["initial_pool"]
-                }
-                result["top_k_results"] = [
-                    {**item, **trans_map.get(item["id"], {})}
-                    for item in result["top_k_results"]
-                ]
+                result["top_k_results"] = _merge_enrichment(
+                    result["top_k_results"], result["initial_pool"]
+                )
             st.session_state.query = query.strip()
             st.session_state.safe_search = safe_search
             st.session_state.initial_pool = result["initial_pool"]
@@ -420,29 +558,52 @@ def _main_stage_1() -> None:
     st.caption(t["rate_section_caption"])
     st.space("small")
 
-    for i, item in enumerate(st.session_state.top_k_results, start=1):
-        rating_key = f"rating_{_slug(str(item['id']))}"
-        _render_card(item, rank=i, show_rating=True, rating_key=rating_key)
+    items = st.session_state.top_k_results
+    # Build row by row (a fresh st.columns per row) so cards in the same row
+    # stay top-aligned even when synopsis lengths differ.
+    for row_start in range(0, len(items), _GRID_COLS):
+        cols = st.columns(_GRID_COLS)
+        for offset, item in enumerate(items[row_start:row_start + _GRID_COLS]):
+            with cols[offset]:
+                _render_grid_card(
+                    item,
+                    rank=row_start + offset + 1,
+                    rating_key=f"rating_{_slug(str(item['id']))}",
+                )
 
     st.divider()
 
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
         if st.button(t["get_recs_button"], type="primary", key="get_recs"):
-            ratings = _collect_ratings()
-            # Oversample so filtering phase-1 IDs still leaves _TOP_K results.
-            # Rocchio needs the full pool (including rated items) to compute the
-            # shifted vector; we exclude phase-1 IDs only from the output.
-            phase1_ids = {item["id"] for item in st.session_state.top_k_results}
-            recs_raw = apply_user_feedback(
-                original_query_vector=st.session_state.query_vector,
-                rated_items=ratings,
-                candidate_pool=st.session_state.initial_pool,
-                top_k=_TOP_K * 2,
-            )
-            st.session_state.final_recs = [
-                r for r in recs_raw if r["id"] not in phase1_ids
-            ][:_TOP_K]
+            with st.spinner("Personalizing…"):
+                pool = st.session_state.initial_pool
+                ratings = _collect_ratings()
+                feedback_vector = build_feedback_vector(
+                    st.session_state.query_vector, ratings, pool,
+                )
+                query_vec = feedback_vector if feedback_vector is not None else st.session_state.query_vector
+                anchor_items = [it for it in items if ratings.get(it["title"], 0) >= 4]
+                phase_1_ids = {it["id"] for it in items}
+                coll = _get_collection()
+                # Oversample ChromaDB: genre filter + RRF will trim the list down.
+                chroma_items_raw = _chroma_items_for_vector(
+                    query_vec, coll, phase_1_ids, n=_PHASE2_DEPTH * 3,
+                )
+                # get_hybrid_recommendations fetches /discover internally and fuses
+                # via RRF; the sidebar debug expander fires as a side effect.
+                recs = get_hybrid_recommendations(
+                    chroma_items_raw, anchor_items, phase_1_ids, collection=coll,
+                )
+                pool_ids = {p["id"] for p in pool}
+                # Pool items were already enriched in stage 0; only fetch the new ones.
+                newly_enriched = _enrich_with_translations(
+                    [r for r in recs if r["id"] not in pool_ids]
+                )
+                st.session_state.final_recs = _merge_enrichment(recs, pool + newly_enriched)
+                st.session_state.debug_hybrid = {
+                    "chroma_raw": [it["title"] for it in chroma_items_raw],
+                }
             st.session_state.provider_filter = []
             _go_to(2)
 
@@ -473,7 +634,13 @@ def _main_stage_2() -> None:
         st.info(t["no_provider_matches"])
         return
 
-    for rank, item in enumerate(display_recs, start=1):
+    debug = st.session_state.get("debug_hybrid")
+    if debug and "chroma_raw" in debug:
+        with st.expander("Debug: Hybrid Engine Check"):
+            st.write("**Raw ChromaDB Results** (before filter):", debug["chroma_raw"])
+            st.caption("TMDB /discover results are shown in the sidebar expander during personalisation.")
+
+    for rank, item in enumerate(display_recs[:_TOP_K], start=1):
         _render_card(item, rank=rank)
 
 
