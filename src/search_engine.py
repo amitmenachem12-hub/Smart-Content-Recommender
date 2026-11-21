@@ -126,7 +126,7 @@ _SEQUEL_RE = re.compile(
 # Maps frozensets of trigger keywords → (ISO 639-1 language code, ISO 3166-1 country codes).
 # A result passes if its original_language matches OR any of its origin_country codes match.
 _COUNTRY_FILTER_MAP: list[tuple[frozenset[str], str, list[str]]] = [
-    (frozenset(["israeli", "israel", "hebrew"]), "he", ["IL"]),
+    (frozenset(["israeli", "israel"]), "he", ["IL"]),
 ]
 
 _NEGATIVE_KEYWORDS = frozenset([
@@ -193,9 +193,9 @@ def _build_hard_filter(
     query_lower = query_text.lower()
 
     target_media: str | None = None
-    if re.search(r"\b(show|series|tv)\b|סדרה|סדרות|טלוויזיה|תכנית|תוכנית", query_lower):
+    if re.search(r"\b(show|series|tv)\b", query_lower):
         target_media = "TV Show"
-    elif re.search(r"\b(movie|film)\b|סרט|סרטים|קולנוע", query_lower):
+    elif re.search(r"\b(movie|film)\b", query_lower):
         target_media = "Movie"
 
     # Word-boundary matching avoids false positives.

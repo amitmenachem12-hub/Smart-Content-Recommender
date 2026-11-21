@@ -85,32 +85,27 @@ def fetch_watch_providers(tmdb_id: int, media_type: str, region: str = _PROVIDER
 def fetch_item_details(
     tmdb_id: int, media_type: str, provider_region: str = _PROVIDER_REGION
 ) -> dict:
-    """Fetch translations + IL streaming providers for one item.
+    """Fetch English details + streaming providers for one item.
 
-    Uses append_to_response=watch/providers on the en-US call so no extra
-    round-trip is needed.  Hebrew fields fall back to English when TMDB
-    returns an empty string.
+    Uses append_to_response=videos,watch/providers so a single request
+    returns everything needed.
 
-    Returns title_en, title_he, overview_en, overview_he, watch_providers.
+    Returns title, overview, watch_providers, trailer_key.
     """
     segment = "movie" if media_type == "Movie" else "tv"
     title_key = "title" if media_type == "Movie" else "name"
 
-    def _fetch(lang: str, extra: dict | None = None) -> dict:
-        try:
-            resp = requests.get(
-                f"{_BASE_URL}/{segment}/{tmdb_id}",
-                headers=_auth_headers(),
-                params={"language": lang, **(extra or {})},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except Exception:
-            return {}
-
-    en = _fetch("en-US", {"append_to_response": "videos,watch/providers"})
-    he = _fetch("he-IL")
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/{segment}/{tmdb_id}",
+            headers=_auth_headers(),
+            params={"language": "en-US", "append_to_response": "videos,watch/providers"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        en = resp.json()
+    except Exception:
+        en = {}
 
     region_data = (
         en.get("watch/providers", {})
@@ -132,14 +127,9 @@ def fetch_item_details(
         None,
     )
 
-    title_en = en.get(title_key) or ""
-    overview_en = en.get("overview") or ""
-
     return {
-        "title_en": title_en,
-        "overview_en": overview_en,
-        "title_he": he.get(title_key) or title_en,
-        "overview_he": he.get("overview") or overview_en,
+        "title": en.get(title_key) or "",
+        "overview": en.get("overview") or "",
         "watch_providers": providers,
         "trailer_key": trailer_key,
     }
@@ -253,14 +243,9 @@ def fetch_and_cache_popular_movies(limit: int = 2000) -> list[dict]:
     headers = _auth_headers()
     seen: dict[tuple[str, int], dict] = {}
 
-    # Each entry: (endpoint, media_type, pages, extra_params).
-    # The targeted language batches ensure under-represented content (e.g. Israeli
-    # cinema) is present even though it doesn't rank in the global popularity sort.
     sources: list[tuple[str, str, int, dict]] = [
         ("/discover/movie", "Movie",   40, {}),
         ("/discover/tv",   "TV Show", 40, {}),
-        ("/discover/movie", "Movie",    5, {"with_original_language": "he"}),
-        ("/discover/tv",   "TV Show",  5, {"with_original_language": "he"}),
     ]
 
     for endpoint, media_type, pages, extra_params in sources:

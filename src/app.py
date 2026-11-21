@@ -17,14 +17,13 @@ from search_engine import (
     semantic_search,
 )
 from tmdb_client import fetch_item_details, fetch_tmdb_recommendations
-from translations import UI_TEXT
 
 _POOL_SIZE = 100
 _TOP_K = 10
 _PHASE1_K = 24
 # Fetched deeper than _TOP_K so peers survive the frontend streaming-provider filter.
 _PHASE2_DEPTH = 40
-_ENRICHED_KEYS = ("title_en", "title_he", "overview_en", "overview_he", "watch_providers", "trailer_key")
+_ENRICHED_KEYS = ("title", "overview", "watch_providers", "trailer_key")
 _GRID_COLS = 3
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 _TMDB_LOGO_BASE = "https://image.tmdb.org/t/p/w45"
@@ -214,9 +213,8 @@ def _render_trailer_button(item: dict, rank: int) -> None:
 
 def _render_grid_card(item: dict, rank: int, rating_key: str) -> None:
     """Vertically stacked card sized for a narrow grid column (Phase 1)."""
-    lang = st.session_state.get("lang", "en")
-    title = item.get(f"title_{lang}") or item.get("title", "")
-    overview = item.get(f"overview_{lang}") or item.get("overview", "")
+    title = item.get("title", "")
+    overview = item.get("overview", "")
     synopsis = (overview[:90] + "…") if len(overview) > 90 else overview
     media_type = item.get("media_type", "?")
     type_color = "blue" if media_type == "tv" else "violet"
@@ -235,9 +233,8 @@ def _render_grid_card(item: dict, rank: int, rating_key: str) -> None:
 
 
 def _render_card(item: dict, rank: int) -> None:
-    lang = st.session_state.get("lang", "en")
-    title = item.get(f"title_{lang}") or item.get("title", "")
-    overview = item.get(f"overview_{lang}") or item.get("overview", "")
+    title = item.get("title", "")
+    overview = item.get("overview", "")
     synopsis = (overview[:130] + "…") if len(overview) > 130 else overview
     media_type = item.get("media_type", "?")
     genres = _genre_names(item)
@@ -285,7 +282,6 @@ def _init_state() -> None:
         "top_k_results": [],
         "query_vector": None,
         "final_recs": [],
-        "lang": "en",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -305,17 +301,15 @@ def _go_to(stage: int) -> None:
 
 # ─── Enrichment ───────────────────────────────────────────────────────────────
 
-def _enrich_with_translations(items: list[dict]) -> list[dict]:
-    """Fetch translations + IL watch providers from TMDB for each item."""
+def _enrich_items(items: list[dict]) -> list[dict]:
+    """Fetch English details + watch providers from TMDB for each item."""
     def _enrich_one(item: dict) -> dict:
         numeric_id = int(str(item["id"]).rsplit("_", 1)[-1])
         details = fetch_item_details(numeric_id, item["media_type"])
         return {
             **item,
-            "title_en": details.get("title_en") or item.get("title", ""),
-            "title_he": details.get("title_he") or item.get("title", ""),
-            "overview_en": details.get("overview_en") or item.get("overview", ""),
-            "overview_he": details.get("overview_he") or item.get("overview", ""),
+            "title": details.get("title") or item.get("title", ""),
+            "overview": details.get("overview") or item.get("overview", ""),
             "watch_providers": details.get("watch_providers", item.get("watch_providers", [])),
             "trailer_key": details.get("trailer_key"),
         }
@@ -452,7 +446,7 @@ def _collect_ratings() -> dict[str, int]:
     return ratings
 
 
-def _header_row(t: dict) -> None:
+def _header_row() -> None:
     """Query pill + start-over button, shared by stage 1 and 2."""
     hdr_col, reset_col = st.columns([5, 1])
     with hdr_col:
@@ -461,11 +455,11 @@ def _header_row(t: dict) -> None:
         )
     with reset_col:
         st.space("small")
-        if st.button(t["start_over"], key="header_reset"):
+        if st.button(":material/restart_alt: Start over", key="header_reset"):
             _reset()
 
 
-def _provider_filter(display_recs: list[dict], t: dict) -> list[dict]:
+def _provider_filter(display_recs: list[dict]) -> list[dict]:
     """Render provider multiselect and return the filtered list."""
     all_providers = sorted({
         p["name"]
@@ -481,10 +475,10 @@ def _provider_filter(display_recs: list[dict], t: dict) -> list[dict]:
             p for p in st.session_state.provider_filter if p in all_providers
         ]
     st.multiselect(
-        t["provider_filter_label"],
+        "Filter by streaming platform",
         options=all_providers,
         key="provider_filter",
-        placeholder=t["provider_filter_placeholder"],
+        placeholder="All platforms",
     )
 
     selected: list[str] = st.session_state.get("provider_filter", [])
@@ -499,20 +493,19 @@ def _provider_filter(display_recs: list[dict], t: dict) -> list[dict]:
 # ─── Stage renderers ─────────────────────────────────────────────────────────
 
 def _main_stage_0() -> None:
-    t = UI_TEXT[st.session_state.lang]
-    st.html(f"""
+    st.html("""
 <div class="scr-hero">
   <div class="scr-hero-icon">🎬</div>
-  <h1 class="scr-hero-title">{_esc(t["hero_title"])}</h1>
-  <p class="scr-hero-subtitle">{_esc(t["hero_subtitle"])}</p>
+  <h1 class="scr-hero-title">Find your next binge.</h1>
+  <p class="scr-hero-subtitle">Describe what you&#39;re in the mood for and we&#39;ll find films and shows that fit — no genre checkboxes required.</p>
 </div>
 """)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("search_form"):
             query = st.text_input(
-                t["search_label"],
-                placeholder=t["search_placeholder"],
+                "What are you in the mood for?",
+                placeholder="e.g. relaxing comedy about friends in New York",
                 key="query_input",
             )
             safe_search = st.toggle(
@@ -535,7 +528,7 @@ def _main_stage_0() -> None:
                     collection=_get_collection(),
                     safe_search=safe_search,
                 )
-                result["initial_pool"] = _enrich_with_translations(result["initial_pool"])
+                result["initial_pool"] = _enrich_items(result["initial_pool"])
                 result["top_k_results"] = _merge_enrichment(
                     result["top_k_results"], result["initial_pool"]
                 )
@@ -551,11 +544,10 @@ def _main_stage_0() -> None:
 
 def _main_stage_1() -> None:
     """Phase 1: show initial candidates for rating. Rocchio runs on button click."""
-    t = UI_TEXT[st.session_state.lang]
-    _header_row(t)
+    _header_row()
 
-    st.markdown(f"#### {t['rate_section_title']}")
-    st.caption(t["rate_section_caption"])
+    st.markdown("#### Rate what you know")
+    st.caption("Rate titles you recognize — then click the button below to get personalized picks.")
     st.space("small")
 
     items = st.session_state.top_k_results
@@ -575,7 +567,7 @@ def _main_stage_1() -> None:
 
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
-        if st.button(t["get_recs_button"], type="primary", key="get_recs"):
+        if st.button(":material/auto_awesome: Get my recommendations", type="primary", key="get_recs"):
             with st.spinner("Personalizing…"):
                 pool = st.session_state.initial_pool
                 ratings = _collect_ratings()
@@ -597,7 +589,7 @@ def _main_stage_1() -> None:
                 )
                 pool_ids = {p["id"] for p in pool}
                 # Pool items were already enriched in stage 0; only fetch the new ones.
-                newly_enriched = _enrich_with_translations(
+                newly_enriched = _enrich_items(
                     [r for r in recs if r["id"] not in pool_ids]
                 )
                 st.session_state.final_recs = _merge_enrichment(recs, pool + newly_enriched)
@@ -610,16 +602,15 @@ def _main_stage_1() -> None:
 
 def _main_stage_2() -> None:
     """Phase 2: show final personalized recommendations, all phase-1 IDs excluded."""
-    t = UI_TEXT[st.session_state.lang]
-    _header_row(t)
+    _header_row()
 
-    st.markdown(f"#### {t['final_recs_title']}")
+    st.markdown("#### Your recommendations")
     ratings = _collect_ratings()
     n = len(ratings)
     if n:
-        st.caption(t["final_recs_caption_rated"].format(n=n, s="" if n == 1 else "s"))
+        st.caption(f":material/auto_awesome: Personalized via Rocchio · {n} title{'s' if n != 1 else ''} rated")
     else:
-        st.caption(t["final_recs_caption_no_ratings"])
+        st.caption("Showing best semantic matches — rate titles and search again to personalize.")
     st.space("small")
 
     display_recs = list(st.session_state.get("final_recs", []))
@@ -628,10 +619,10 @@ def _main_stage_2() -> None:
         st.info("No recommendations found — try a different search.")
         return
 
-    display_recs = _provider_filter(display_recs, t)
+    display_recs = _provider_filter(display_recs)
 
     if not display_recs:
-        st.info(t["no_provider_matches"])
+        st.info("No results match the selected platforms — try adding more.")
         return
 
     debug = st.session_state.get("debug_hybrid")
@@ -657,39 +648,6 @@ def main() -> None:
     _inject_styles()
     _init_state()
 
-    _, lang_col = st.columns([4, 1])
-    with lang_col:
-        st.segmented_control(
-            UI_TEXT[st.session_state.lang]["lang_toggle"],
-            options=["en", "he"],
-            default=st.session_state.lang,
-            format_func=lambda x: x.upper(),
-            key="lang",
-        )
-
-    if st.session_state.lang == "he":
-        st.markdown("""
-<style>
-/* ── Hebrew RTL ─────────────────────────────────────────────────── */
-.block-container, p, h1, h2, h3, div {
-    direction: rtl;
-    text-align: right;
-}
-
-/* Preserve st.columns order — RTL on a flex-row reverses item order */
-[data-testid="stHorizontalBlock"] {
-    direction: ltr;
-}
-
-/* Keep exception tracebacks and code blocks readable (LTR) */
-.stException, .stException *,
-code, pre {
-    direction: ltr !important;
-    text-align: left !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
     main_fn = {
         0: _main_stage_0,
         1: _main_stage_1,
@@ -698,7 +656,10 @@ code, pre {
     main_fn[st.session_state.stage]()
 
     st.html(
-        f'<div class="scr-footer">{_esc(UI_TEXT[st.session_state.lang]["footer"])}</div>'
+        '<div class="scr-footer">'
+        "This product uses the TMDB API but is not endorsed or certified by TMDB. "
+        "The developer holds no legal responsibility for the accuracy of the content."
+        "</div>"
     )
 
 
